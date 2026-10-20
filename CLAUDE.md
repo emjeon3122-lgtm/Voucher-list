@@ -10,9 +10,11 @@ See `README.md` (기능·구조), `docs/DESIGN.md` (DB·흐름·보안), `docs/N
 - Production runs on the company Synology NAS (DS1019+, DSM 7.3) the same way as the 실적 대시보드: `network_mode: host`
   (bridge between containers does not work on that NAS), app bound to `127.0.0.1:${PORT}` (7030), DSM reverse proxy https 7031
   in front, read-only container as `APP_UID:APP_GID`, all data under `./data` (`voucher.db`, `signatures/`, `backups/`).
-- Login is Microsoft Entra ID OIDC + PKCE (`app/oidc.py`, `AUTH_MODE=oidc`, tenant `bdo.kr`); users must already be in the
-  `users` roster (matched by email on first login, then `sso_subject`). Entra app role `OIDC_ADMIN_ROLE` grants admin.
-  `AUTH_MODE=email` (mail code login) is only a temporary fallback.
+- Only the admin (currently one person) ever logs in. Employees never log in: they are just recipients in the `users`
+  roster (`role='staff'`) and sign through the emailed one-time link (`/sign?t=...`), which must stay login-free.
+- Admin login is Microsoft Entra ID OIDC + PKCE (`app/oidc.py`, `AUTH_MODE=oidc`, tenant `bdo.kr`); only roster users with
+  `role='admin'` (or the Entra app role `OIDC_ADMIN_ROLE`) are let in, matched by email on first login, then `sso_subject`.
+  `AUTH_MODE=email` (mail code login, admins only) is only a temporary fallback.
 - Mail goes through Microsoft Graph `sendMail` (`MAIL_BACKEND=graph`) or SMTP; `console`/`memory` for testing.
 - `config.check_production` refuses to start on unsafe settings unless `TESTING` or `DEV_MODE`.
 - Stock/balance are never stored — computed with window functions in `services.py`. Ledger rows are never deleted (void only).

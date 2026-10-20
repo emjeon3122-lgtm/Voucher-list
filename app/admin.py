@@ -117,12 +117,12 @@ def _roster_rows(file):
 @bp.get("/users/export.xlsx")
 @admin_required
 def user_export():
-    """현재 직원 명단을 업로드 양식 그대로 내려받기 (고쳐서 다시 올리면 반영)."""
+    """현재 수령자 명단을 업로드 양식 그대로 내려받기 (고쳐서 다시 올리면 반영)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     wb = Workbook()
     ws = wb.active
-    ws.title = "직원명단"
+    ws.title = "수령자명단"
     ws.append(ROSTER_HEADERS + ["사용", "Microsoft 계정 연결"])
     for c in ws[1]:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F4E78")
@@ -136,7 +136,7 @@ def user_export():
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    return send_file(bio, as_attachment=True, download_name=f"직원명단_{now_str()[:10].replace('-', '')}.xlsx",
+    return send_file(bio, as_attachment=True, download_name=f"수령자명단_{now_str()[:10].replace('-', '')}.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 

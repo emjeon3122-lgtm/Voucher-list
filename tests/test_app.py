@@ -32,23 +32,26 @@ def add_out(c, qty, recipient=KIM, type_id=T50, date="2026-01-10", send=False):
 def test_login_requires_registered_email(app, outbox):
     c = app.test_client()
     resp = c.post("/login", data={"email": "nobody@co.kr"})
-    assert resp.status_code == 400
+    assert resp.status_code == 403
     assert not outbox
     assert c.get("/ledger").status_code == 302  # 로그인 필요
 
 
 def test_wrong_code_rejected(app, outbox):
     c = app.test_client()
-    c.post("/login", data={"email": "kim@co.kr"})
-    assert c.post("/login/verify", data={"code": "000000x"}).status_code in (400, 302)
-    assert c.get("/my").status_code == 302
+    c.post("/login", data={"email": "admin@co.kr"})
+    assert c.post("/login/verify", data={"code": "000000x"}).status_code == 400
+    assert c.get("/ledger").status_code == 302
 
 
-def test_staff_cannot_open_ledger(app, outbox):
+def test_only_admin_can_log_in(app, outbox):
+    """수령자(일반 직원)는 로그인하지 않는다 — 인증코드도 보내지 않음."""
     c = app.test_client()
-    login(c, outbox, "kim@co.kr")
-    assert c.get("/ledger").status_code == 403
-    assert c.get("/my").status_code == 200
+    r = c.post("/login", data={"email": "kim@co.kr"})
+    assert r.status_code == 403 and "관리자 계정이 아닙니다" in r.get_data(as_text=True)
+    assert not outbox
+    assert c.get("/ledger").status_code == 302
+    assert c.get("/my").status_code == 404  # 직원용 화면 없음
 
 
 def test_stock_and_balance(app, admin_client):
@@ -118,9 +121,7 @@ def test_sign_flow(app, admin_client, outbox):
     assert "/signature/2.png" in img
     assert admin_client.get("/signature/2.png").mimetype == "image/png"
 
-    other = app.test_client()
-    login(other, outbox, "lee@co.kr")
-    assert other.get("/signature/2.png").status_code == 403
+    assert app.test_client().get("/signature/2.png").status_code == 302  # 로그인 안 한 사람은 서명 이미지를 볼 수 없음
 
 
 def test_bulk_request_groups_by_recipient_and_resend_invalidates_old_link(app, admin_client, outbox):
@@ -143,18 +144,17 @@ def test_bulk_request_groups_by_recipient_and_resend_invalidates_old_link(app, a
     assert statuses == ["SIGNED", "SIGNED", "REQUESTED"]
 
 
-def test_staff_can_sign_from_my_page(app, admin_client, outbox):
+def test_sign_needs_no_login(app, admin_client, outbox):
+    """수령자는 로그인 없이 메일 링크만으로 서명한다."""
     add_in(admin_client, 3)
     add_out(admin_client, 1, recipient=LEE, send=True)
-    c = app.test_client()
-    login(c, outbox, "lee@co.kr")
-    assert "지금 서명하기" in c.get("/my").get_data(as_text=True)
-    r = c.post("/sign/r/1", data={"agree": "1", "signer_name": "이영희", "signature": signature_data_url()})
+    anon = app.test_client()
+    link = sign_link(outbox[-1])
+    assert anon.get(link).status_code == 200
+    r = anon.post(link, data={"agree": "1", "signer_name": "이영희", "signature": signature_data_url()})
     assert r.status_code == 302
     assert q(app, "SELECT sign_status FROM transactions WHERE id=2")[0][0] == "SIGNED"
-    kim = app.test_client()
-    login(kim, outbox, "kim@co.kr")
-    assert kim.get("/sign/r/1").status_code == 404
+    assert anon.get("/sign?t=wrong-token").status_code == 404
 
 
 def test_excel_export(app, admin_client, outbox):

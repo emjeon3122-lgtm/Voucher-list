@@ -22,7 +22,6 @@ def app(tmp_path):
         "ALLOWED_EMAIL_DOMAINS": [],
         "PUBLIC_URL": "http://nas.test",
         "AUTH_MODE": "email",
-        "SIGN_REQUIRE_LOGIN": False,
     })
     with app.app_context():
         conn = connect(db_path(app))

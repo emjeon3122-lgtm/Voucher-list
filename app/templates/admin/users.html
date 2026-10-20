@@ -1,13 +1,14 @@
 {% extends "base.html" %}
-{% block title %}직원 관리{% endblock %}
+{% block title %}수령자 명단{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<h1>직원 관리</h1>
-<p class="muted">등록된 직원만 회사 Microsoft 365 계정으로 로그인할 수 있고, 상품권 수령자로 선택할 수 있습니다. 퇴사자는 삭제하지 않고 '사용' 체크를 해제하세요 (기존 대장 기록 보존).</p>
+<h1>수령자 명단</h1>
+<p class="muted">상품권을 지급할 때 수령자로 고르는 명단입니다. 수령자는 로그인하지 않고, 등록된 회사 메일로 받은 링크에서 서명만 합니다.
+이 시스템에 접속할 수 있는 사람은 권한이 <b>관리자</b>인 계정뿐입니다. 퇴사자는 삭제하지 않고 '사용' 체크를 해제하세요 (기존 대장 기록 보존).</p>
 
 <div class="grid2 top">
   <section class="panel">
-    <h2>직원 개별 등록</h2>
+    <h2>개별 등록</h2>
     <form method="post" action="{{ url_for('admin.user_create') }}" class="grid2">
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <label>회사 메일 <input type="email" name="email" required placeholder="name@company.co.kr"></label>
@@ -15,7 +16,7 @@
       <label>부서 <input name="department" maxlength="100"></label>
       <label>사번 <input name="employee_no" maxlength="50"></label>
       <label>권한
-        <select name="role"><option value="staff">일반 직원</option><option value="admin">관리자</option></select>
+        <select name="role"><option value="staff">수령자</option><option value="admin">관리자 (접속 가능)</option></select>
       </label>
       <div class="end"><button class="btn primary">등록</button></div>
     </form>
@@ -23,7 +24,7 @@
   <section class="panel">
     <h2>엑셀 일괄 등록</h2>
     <p class="muted small"><a href="{{ url_for('admin.user_export') }}">⬇ 현재 명단 엑셀로 받기</a> → <code>이메일, 성명, 부서, 사번, 권한(관리자)</code> 칸을 채워 다시 올리세요.
-      첫 줄 머리글은 건너뜁니다. 이미 있는 메일은 성명/부서/사번이 갱신되고, 엑셀에 없는 직원은 지워지지 않습니다. (CSV도 가능)</p>
+      첫 줄 머리글은 건너뜁니다. 이미 있는 메일은 성명/부서/사번이 갱신되고, 엑셀에 없는 사람은 지워지지 않습니다. (CSV도 가능)</p>
     <form method="post" action="{{ url_for('admin.user_import') }}" enctype="multipart/form-data" class="row">
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <input type="file" name="file" accept=".xlsx,.csv" required>
@@ -45,7 +46,7 @@
       <td><input form="u-{{ u.id }}" name="employee_no" value="{{ u.employee_no }}" class="short"></td>
       <td>
         <select form="u-{{ u.id }}" name="role">
-          <option value="staff" {{ 'selected' if u.role == 'staff' }}>직원</option>
+          <option value="staff" {{ 'selected' if u.role == 'staff' }}>수령자</option>
           <option value="admin" {{ 'selected' if u.role == 'admin' }}>관리자</option>
         </select>
       </td>

@@ -47,7 +47,7 @@ class Config:
     # email: 회사 메일로 받은 6자리 인증코드로 로그인 (Entra 앱 등록 전 임시용)
     AUTH_MODE = env("AUTH_MODE", "email").strip().lower()
     ALLOWED_EMAIL_DOMAINS = _list("ALLOWED_EMAIL_DOMAINS")
-    ADMIN_EMAILS = env("ADMIN_EMAILS")  # 처음 설정용 관리자. 예: a@bdo.kr:홍길동,b@bdo.kr
+    ADMIN_EMAILS = env("ADMIN_EMAILS")  # 관리자(접속할 수 있는 사람). 예: a@bdo.kr:홍길동
     SESSION_HOURS = _int("SESSION_HOURS", 8)
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
@@ -66,8 +66,6 @@ class Config:
 
     # ---- 전자서명 ----
     SIGN_LINK_DAYS = _int("SIGN_LINK_DAYS", 7)
-    # 서명 전 회사 계정 로그인으로 본인 확인. 비우면 oidc 모드에서 자동으로 켜집니다.
-    SIGN_REQUIRE_LOGIN = _bool("SIGN_REQUIRE_LOGIN", AUTH_MODE == "oidc")
 
     # ---- 메일 ----
     # graph  : Microsoft Graph API 로 발송 (Microsoft 365 권장, Entra 앱에 Mail.Send 권한 필요)

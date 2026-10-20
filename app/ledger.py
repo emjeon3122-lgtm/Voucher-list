@@ -5,7 +5,7 @@ from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, r
                    send_file, url_for)
 
 from . import mailer
-from .auth import admin_required, login_required
+from .auth import admin_required
 from .db import get_db
 from .services import (LedgerError, create_sign_requests, create_transaction, export_xlsx, ledger_rows,
                        ledger_totals, ledger_version, signature_dir, stock_summary, void_transaction)
@@ -53,9 +53,9 @@ def favicon():
 
 
 @bp.get("/")
-@login_required
+@admin_required
 def home():
-    return redirect(url_for("ledger.index" if g.user["role"] == "admin" else "ledger.my"))
+    return redirect(url_for("ledger.index"))
 
 
 @bp.get("/ledger")
@@ -154,7 +154,7 @@ def version():
 
 
 @bp.get("/signature/<int:txn_id>.png")
-@login_required
+@admin_required
 def signature_image(txn_id):
     row = get_db().execute(
         """SELECT t.recipient_id, sr.signature_file FROM transactions t
@@ -164,27 +164,9 @@ def signature_image(txn_id):
     ).fetchone()
     if row is None or not row["signature_file"]:
         abort(404)
-    if g.user["role"] != "admin" and g.user["id"] != row["recipient_id"]:
-        abort(403)
     path = os.path.join(signature_dir(), os.path.basename(row["signature_file"]))
     if not os.path.exists(path):
         abort(404)
     resp = send_file(path, mimetype="image/png", max_age=0)
     resp.headers["Cache-Control"] = "private, no-store"
     return resp
-
-
-@bp.get("/my")
-@login_required
-def my():
-    db = get_db()
-    pending = db.execute(
-        """SELECT sr.*, (SELECT COUNT(*) FROM signature_request_items i JOIN transactions t ON t.id = i.transaction_id
-                          WHERE i.request_id = sr.id AND t.is_void = 0) AS line_count
-             FROM signature_requests sr
-            WHERE sr.recipient_id = ? AND sr.status = 'PENDING' AND sr.expires_at >= ?
-            ORDER BY sr.requested_at DESC""",
-        (g.user["id"], now_str()),
-    ).fetchall()
-    rows = ledger_rows(db, {"recipient_id": g.user["id"]})
-    return render_template("my.html", pending=[p for p in pending if p["line_count"]], rows=rows)

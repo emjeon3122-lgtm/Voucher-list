@@ -13,7 +13,8 @@
 
 - **권한**
   - 관리자(admin): 수불 대장 조회, 입출고, 취소, 서명 요청, 엑셀, 직원/권종 관리, 감사 로그
-  - 직원(staff): 내 수령 내역 조회, 본인 서명
+  - 수령자(staff): **로그인하지 않음.** 메일로 받은 링크에서 서명만 함
+  - 접속 가능한 사람은 관리자뿐 (현재 1명)
 
 ## 2. DB 구조 (SQLite)
 
@@ -29,11 +30,11 @@ login_codes, audit_log
 | 컬럼 | 설명 |
 |---|---|
 | id | PK |
-| email | 회사 메일 (로그인 ID, 대소문자 무시, 유일) |
+| email | 회사 메일 (서명 요청 메일 받는 주소, 관리자는 로그인 ID. 대소문자 무시, 유일) |
 | name / department / employee_no | 성명 / 부서 / 사번 |
-| role | `admin` 관리자, `staff` 직원 (Entra 앱 역할 `Admin` 을 받은 사람은 로그인 동안 관리자) |
-| sso_subject | Microsoft 계정 고유값 `oidc:<oid>`. 첫 로그인 때 회사 메일로 명단과 연결한 뒤 이 값으로 찾음 |
-| is_active | 0이면 로그인 불가, 수령자 선택 불가 (퇴사자는 삭제하지 않고 비활성화) |
+| role | `admin` 관리자(접속 가능), `staff` 수령자(접속 불가). Entra 앱 역할 `Admin` 을 받은 사람도 관리자 |
+| sso_subject | 관리자의 Microsoft 계정 고유값 `oidc:<oid>`. 첫 로그인 때 회사 메일로 연결한 뒤 이 값으로 찾음 |
+| is_active | 0이면 수령자 선택 불가, 관리자는 로그인 불가 (퇴사자는 삭제하지 않고 비활성화) |
 
 ### voucher_types: 상품권 종류 + 권종
 | 컬럼 | 설명 |
@@ -103,8 +104,7 @@ SUM(CASE WHEN is_void=1 THEN 0 WHEN direction='IN' THEN amount   ELSE -amount   
                    ─▶ 출고 행 sign_status = REQUESTED
                    ─▶ 백그라운드로 Graph(또는 SMTP) 메일 발송 (결과는 mail_sent_at / mail_error 에 기록)
 직원 메일 링크 열기 (/sign?t=토큰)
-   ─▶ 토큰 해시로 요청 조회
-   ─▶ 로그인 안 됨 → Microsoft 로그인 → 같은 서명 화면으로 복귀 / 로그인 계정 ≠ 수령자 → 거부
+   ─▶ 토큰 해시로 요청 조회 (로그인 없음)
    ─▶ 상태·만료 확인 → 수령 내역 표시
    ─▶ 동의 체크 + 성명 입력(등록된 성명과 일치해야 함) + 캔버스 서명
    ─▶ 서버: PNG 검증(형식, 크기, 빈 서명 여부) → 흰 배경 PNG로 정규화 → data/signatures 에 저장
@@ -114,20 +114,22 @@ SUM(CASE WHEN is_void=1 THEN 0 WHEN direction='IN' THEN amount   ELSE -amount   
 
 본인 확인 단계
 1. 링크가 수령자 본인의 회사 메일함으로만 발송됩니다. 토큰은 추측이 불가능한 256비트 값입니다.
-2. 링크를 연 사람이 **Microsoft 365 로 로그인**해야 하고, 로그인한 계정이 수령자 본인이어야 합니다(회사 MFA 정책 적용).
-   `SIGN_REQUIRE_LOGIN` (oidc 모드 기본값 켜짐). 메일이 다른 사람에게 전달돼도 그 사람은 서명할 수 없습니다.
-3. 등록된 성명을 직접 입력하고, 수령 확인에 동의해야 합니다.
+2. 등록된 성명을 직접 입력하고, 수령 확인에 동의해야 합니다.
+3. 서명 시각, 접속 IP, 기기 정보, 서명 이미지 해시를 함께 기록합니다.
+
+링크는 1회용(서명하면 끝)이고 기한(기본 7일)이 있으며, 다시 보내면 이전 링크는 무효가 됩니다.
+링크를 가진 사람은 누구나 서명 화면을 열 수 있으므로, 수령자에게 메일을 다른 사람에게 전달하지 말라고 안내합니다(메일 본문에 표시).
 
 ## 4. 보안
 
 - 비밀번호를 저장하지 않습니다. 로그인은 Microsoft Entra ID (Authorization Code + PKCE).
   ID 토큰 서명(RS256)·발급자·대상·만료·nonce·테넌트(tid)·이메일 도메인('@' 하나)을 검사하고, state 는 1회용입니다.
-- 직원 명단에 없거나 사용 중지된 계정은 회사 계정이어도 로그인할 수 없습니다(로그에 기록).
+- 관리자가 아닌 계정(수령자, 명단에 없는 사람, 사용 중지)은 회사 계정이어도 로그인할 수 없습니다(로그에 기록).
 - 위험한 설정(짧은 `SESSION_SECRET`, 빈 OIDC 값, https 아닌 `PUBLIC_URL`, 허용 도메인 없음)이면 앱이 시작되지 않습니다.
 - 컨테이너: 일반 계정 실행, 읽기 전용 파일시스템, `no-new-privileges`, `cap_drop: ALL`, 메모리·프로세스 상한, 127.0.0.1 에만 열림.
 - Graph `Mail.Send` 는 Exchange 정책으로 보내는 사서함 1개로 제한합니다(NAS_DEPLOY.md 2-5).
 - CSRF 토큰으로 모든 POST 요청을 보호합니다. 세션 쿠키에는 HttpOnly와 SameSite=Lax를 설정합니다.
 - CSP, X-Frame-Options, Referrer-Policy(no-referrer), COOP, Permissions-Policy, HSTS, `Cache-Control: no-store` 헤더를 사용합니다.
 - 서명 토큰을 경로가 아닌 쿼리스트링으로 전달하고, Gunicorn 접속 로그에는 쿼리스트링을 기록하지 않습니다.
-- 서명 이미지는 로그인한 관리자와 수령자 본인만 볼 수 있습니다.
+- 서명 이미지는 로그인한 관리자만 볼 수 있습니다.
 - 서명 파일의 SHA-256 값을 DB와 엑셀에 함께 남깁니다. 파일이 바뀌었는지 확인할 수 있습니다.

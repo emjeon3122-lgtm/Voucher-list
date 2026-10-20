@@ -1,7 +1,6 @@
-"""전자서명 페이지. 메일 링크(토큰) 또는 로그인한 본인 계정으로 접근합니다."""
-from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, url_for
+"""전자서명 페이지. 직원은 로그인 없이 메일로 받은 링크(1회용 토큰)로만 접근합니다."""
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
-from .auth import login_required
 from .db import get_db
 from .services import LedgerError, complete_signature, find_request_by_token, request_lines
 from .utils import now_str
@@ -17,14 +16,6 @@ def _handle(req, self_url):
     db = get_db()
     if req is None:
         return _invalid("유효하지 않은 서명 링크입니다. 메일의 링크를 다시 확인해 주세요.", 404)
-    if current_app.config["SIGN_REQUIRE_LOGIN"] and (g.user is None or g.user["id"] != req["recipient_id"]):
-        if g.user is not None:
-            return _invalid("이 서명 요청은 다른 직원에게 발송된 것입니다. 본인 계정으로 로그인하세요.", 403)
-        if current_app.config["AUTH_MODE"] == "oidc":  # 바로 Microsoft 로그인으로 → 끝나면 이 서명 화면으로 복귀
-            return redirect(url_for("auth.oidc_login", next=self_url))
-        flash("본인 확인을 위해 회사 메일 인증 후 서명할 수 있습니다.", "info")
-        return redirect(url_for("auth.login", next=self_url))
-
     recipient = db.execute("SELECT * FROM users WHERE id = ?", (req["recipient_id"],)).fetchone()
     if req["status"] == "SIGNED":
         return render_template("sign_done.html", req=req, recipient=recipient, lines=request_lines(db, req["id"]))
@@ -59,12 +50,3 @@ def by_token():
     token = request.args.get("t", "")
     req = find_request_by_token(get_db(), token)
     return _handle(req, url_for("sign.by_token", t=token))
-
-
-@bp.route("/r/<int:req_id>", methods=["GET", "POST"])
-@login_required
-def by_login(req_id):
-    req = get_db().execute("SELECT * FROM signature_requests WHERE id = ?", (req_id,)).fetchone()
-    if req is None or req["recipient_id"] != g.user["id"]:
-        abort(404)
-    return _handle(req, url_for("sign.by_login", req_id=req_id))

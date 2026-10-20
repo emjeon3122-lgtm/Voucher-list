@@ -1,7 +1,8 @@
-"""로그인.
+"""관리자 로그인. 직원(수령자)은 로그인하지 않고 메일의 서명 링크만 사용합니다.
 
-AUTH_MODE=oidc  : Microsoft 365(Entra ID) 회사 계정 로그인 (운영). 직원 명단에 등록된 사람만 들어올 수 있습니다.
+AUTH_MODE=oidc  : Microsoft 365(Entra ID) 회사 계정 로그인 (운영).
 AUTH_MODE=email : 회사 메일로 받은 6자리 인증코드로 로그인 (Entra 앱 등록 전 임시용).
+어느 방식이든 직원 명단에서 '관리자'인 사람(또는 Entra 앱 역할 OIDC_ADMIN_ROLE 을 받은 사람)만 들어올 수 있습니다.
 """
 import functools
 import hmac
@@ -55,15 +56,6 @@ def _to_login():
     return redirect(url_for("auth.login", next=target))
 
 
-def login_required(view):
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        if g.user is None:
-            return _to_login()
-        return view(*args, **kwargs)
-    return wrapped
-
-
 def admin_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
@@ -73,6 +65,10 @@ def admin_required(view):
             abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+NOT_ADMIN_MSG = ("{email} 은(는) 관리자 계정이 아닙니다. 이 시스템은 관리자만 접속합니다. "
+                 "상품권 수령 서명은 메일로 받은 링크에서 바로 하시면 됩니다.")
 
 
 def _start_session(user, sso_admin=False):
@@ -134,22 +130,20 @@ def oidc_callback():
         return redirect(url_for("auth.login"))
 
     db = get_db()
+    # 처음에는 명단의 회사 메일로 찾고, 이후로는 Microsoft 계정 고유값(oid)으로 찾습니다.
+    user = (db.execute("SELECT * FROM users WHERE sso_subject = ?", (ident["subject"],)).fetchone()
+            or db.execute("SELECT * FROM users WHERE email = ?", (ident["email"],)).fetchone())
+    sso_admin = current_app.config["OIDC_ADMIN_ROLE"] in ident["roles"]
+    if user is None or not user["is_active"] or not (user["role"] == "admin" or sso_admin):
+        current_app.logger.warning("관리자가 아닌 계정의 로그인 시도: %s", ident["email"])
+        flash(NOT_ADMIN_MSG.format(email=ident["email"]), "error")
+        return redirect(url_for("auth.login"))
     with write_tx(db):
-        # 처음에는 명단의 회사 메일로 찾아 Microsoft 계정 고유값을 기록하고, 이후로는 그 값으로 찾습니다.
-        user = db.execute("SELECT * FROM users WHERE sso_subject = ?", (ident["subject"],)).fetchone()
-        if user is None:
-            user = db.execute("SELECT * FROM users WHERE email = ?", (ident["email"],)).fetchone()
-            if user is not None:
-                if user["sso_subject"]:
-                    current_app.logger.warning("%s 의 Microsoft 계정 연결을 새 값으로 갱신합니다.", ident["email"])
-                db.execute("UPDATE users SET sso_subject = ?, updated_at = ? WHERE id = ?",
-                           (ident["subject"], now_str(), user["id"]))
-        if user is None or not user["is_active"]:
-            current_app.logger.warning("직원 명단에 없거나 사용 중지된 계정의 로그인 시도: %s", ident["email"])
-            flash(f"{ident['email']} 은(는) 직원 명단에 등록되지 않았거나 사용이 중지된 계정입니다. 관리자에게 등록을 요청하세요.",
-                  "error")
-            return redirect(url_for("auth.login"))
-        sso_admin = current_app.config["OIDC_ADMIN_ROLE"] in ident["roles"]
+        if user["sso_subject"] != ident["subject"]:
+            if user["sso_subject"]:
+                current_app.logger.warning("%s 의 Microsoft 계정 연결을 새 값으로 갱신합니다.", ident["email"])
+            db.execute("UPDATE users SET sso_subject = ?, updated_at = ? WHERE id = ?",
+                       (ident["subject"], now_str(), user["id"]))
         audit(db, "LOGIN", f"user:{user['id']}", f"{ident['email']} (Microsoft 365{' / 관리자 역할' if sso_admin else ''})",
               user_id=user["id"])
     return _start_session(user, sso_admin)
@@ -172,8 +166,8 @@ def _email_send_code(nxt):
         return fail(f"회사 메일({', '.join('@' + d for d in domains)})만 사용할 수 있습니다.", 400)
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-    if user is None or not user["is_active"]:
-        return fail("등록되지 않았거나 사용이 중지된 계정입니다. 관리자에게 등록을 요청하세요.", 400)
+    if user is None or not user["is_active"] or user["role"] != "admin":
+        return fail(NOT_ADMIN_MSG.format(email=email), 403)
     recent = db.execute(
         "SELECT COUNT(*) FROM login_codes WHERE email = ? AND created_at >= ?",
         (email, now_str(now() - timedelta(minutes=15))),
@@ -229,7 +223,7 @@ def verify():
         flash(f"인증코드가 올바르지 않습니다. (남은 시도 {left}회)", "error")
         return render_template("verify.html", email=email), 400
 
-    user = db.execute("SELECT * FROM users WHERE email = ? AND is_active = 1", (email,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE email = ? AND is_active = 1 AND role = 'admin'", (email,)).fetchone()
     if user is None:
         abort(403)
     with write_tx(db):

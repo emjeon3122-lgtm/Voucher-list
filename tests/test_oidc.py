@@ -50,7 +50,7 @@ def sso_app(tmp_path):
         "TESTING": True, "DATA_DIR": str(tmp_path), "SECRET_KEY": "x" * 40, "CSRF_DISABLED": True,
         "AUTH_MODE": "oidc", "OIDC_TENANT_ID": TENANT, "OIDC_CLIENT_ID": CLIENT, "OIDC_CLIENT_SECRET": "s",
         "OIDC_ISSUER": ISSUER, "PUBLIC_URL": "https://nas.test", "ALLOWED_EMAIL_DOMAINS": ["co.kr"],
-        "MAIL_BACKEND": "memory", "MAIL_ASYNC": False, "SIGN_REQUIRE_LOGIN": True, "ADMIN_EMAILS": "",
+        "MAIL_BACKEND": "memory", "MAIL_ASYNC": False, "ADMIN_EMAILS": "",
     })
     conn = connect(db_path(app))
     ts = "2026-01-01 00:00:00"
@@ -77,21 +77,25 @@ def test_login_page_shows_microsoft_button(sso_app):
     assert "Microsoft 365 계정으로 로그인" in html and "인증코드" not in html
 
 
-def test_sso_login_links_account(sso_app, provider):
+def test_sso_admin_login_links_account(sso_app, provider):
     c = sso_app.test_client()
-    r = sso_login(c, provider)
-    assert r.status_code == 302 and r.location.endswith("/my")
-    assert c.get("/my").status_code == 200
-    assert c.get("/ledger").status_code == 403  # 일반 직원
+    r = sso_login(c, provider, email="admin@co.kr", oid="oid-admin")
+    assert r.status_code == 302 and r.location.endswith("/my")  # 로그인 전에 열려던 주소로 복귀
+    assert c.get("/ledger").status_code == 200
     conn = connect(db_path(sso_app))
-    assert conn.execute("SELECT sso_subject FROM users WHERE email='kim@co.kr'").fetchone()[0] == "oidc:oid-kim"
+    assert conn.execute("SELECT sso_subject FROM users WHERE email='admin@co.kr'").fetchone()[0] == "oidc:oid-admin"
     conn.close()
+    # 다음 로그인은 메일이 바뀌어도 Microsoft 계정 고유값으로 찾음
+    c3 = sso_app.test_client()
+    sso_login(c3, provider, email="admin.renamed@co.kr", oid="oid-admin")
+    assert c3.get("/ledger").status_code == 200
     # 같은 로그인 응답을 다시 쓰면 거부 (state 는 1회용)
     c2 = sso_app.test_client()
     assert "/login" in c2.get("/auth/callback?code=good-code&state=whatever").location
 
 
 @pytest.mark.parametrize("claims, reason", [
+    ({}, "명단에 있지만 관리자가 아닌 수령자"),
     ({"email": "nobody@co.kr", "oid": "oid-x"}, "명단에 없는 계정"),
     ({"tid": "other-tenant"}, "다른 테넌트"),
     ({"email": "kim@other.com", "oid": "oid-y"}, "허용 안 된 도메인"),
@@ -103,7 +107,7 @@ def test_sso_login_rejected(sso_app, provider, claims, reason):
     c = sso_app.test_client()
     r = sso_login(c, provider, **claims)
     assert "/login" in r.location, reason
-    assert c.get("/my").status_code == 302, reason
+    assert c.get("/ledger").status_code == 302, reason
 
 
 def test_sso_nonce_mismatch_rejected(sso_app, provider):
@@ -111,17 +115,19 @@ def test_sso_nonce_mismatch_rejected(sso_app, provider):
     r = c.get("/auth/login")
     q = urllib.parse.parse_qs(urllib.parse.urlparse(r.location).query)
     provider.nonce = "other"
+    provider.claims = {"email": "admin@co.kr", "oid": "oid-admin"}
     c.get(f"/auth/callback?code=good-code&state={q['state'][0]}")
-    assert c.get("/my").status_code == 302
+    assert c.get("/ledger").status_code == 302
 
 
 def test_entra_admin_role_grants_admin(sso_app, provider):
+    """명단에서 '수령자'여도 Entra 앱 역할 Admin 을 받았으면 관리자로 접속."""
     c = sso_app.test_client()
     sso_login(c, provider, roles=["Admin"])
     assert c.get("/ledger").status_code == 200
 
 
-def test_sign_link_requires_recipient_sso_login(sso_app, provider):
+def test_sign_link_works_without_login_in_oidc_mode(sso_app, provider):
     admin = sso_app.test_client()
     sso_login(admin, provider, email="admin@co.kr", oid="oid-admin")
     admin.post("/ledger/in", data={"txn_date": "2026-01-05", "voucher_type_id": 1, "quantity": 5})
@@ -129,18 +135,9 @@ def test_sign_link_requires_recipient_sso_login(sso_app, provider):
                                     "recipient_id": 2, "send_request": "1"})
     body = sso_app.extensions["outbox"][-1].get_body(("plain",)).get_content()
     link = body[body.index("https://nas.test/sign?t="):].split()[0].replace("https://nas.test", "")
-
-    # 로그인하지 않으면 Microsoft 로그인으로 보냄 (끝나면 서명 화면으로 복귀)
-    anon = sso_app.test_client()
-    r = anon.get(link)
-    assert r.status_code == 302 and "/auth/login" in r.location and "next=" in r.location
-    # 다른 직원(관리자) 계정으로는 서명 불가
-    assert admin.get(link).status_code == 403
-    # 수령자 본인 로그인 후 서명
-    kim = sso_app.test_client()
-    sso_login(kim, provider)
-    assert kim.get(link).status_code == 200
-    r = kim.post(link, data={"agree": "1", "signer_name": "김철수", "signature": signature_data_url()})
+    anon = sso_app.test_client()  # 수령자: Microsoft 로그인 없이 바로 서명
+    assert anon.get(link).status_code == 200
+    r = anon.post(link, data={"agree": "1", "signer_name": "김철수", "signature": signature_data_url()})
     assert r.status_code == 302
     conn = connect(db_path(sso_app))
     assert conn.execute("SELECT sign_status FROM transactions WHERE id=2").fetchone()[0] == "SIGNED"
