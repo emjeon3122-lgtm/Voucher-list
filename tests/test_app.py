@@ -173,7 +173,7 @@ def test_excel_export(app, admin_client, outbox):
 
 def test_csrf_enforced(tmp_path):
     from app import create_app
-    app = create_app({"DATA_DIR": str(tmp_path), "MAIL_BACKEND": "memory", "MAIL_ASYNC": False})
+    app = create_app({"DATA_DIR": str(tmp_path), "MAIL_BACKEND": "memory", "MAIL_ASYNC": False, "DEV_MODE": True})
     c = app.test_client()
     assert c.post("/login", data={"email": "a@b.co"}).status_code == 400
     assert c.get("/healthz").data == b"ok"

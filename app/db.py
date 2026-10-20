@@ -49,9 +49,18 @@ def init_db():
         conn.execute("PRAGMA journal_mode = WAL")
         with current_app.open_resource("schema.sql") as f:
             conn.executescript(f.read().decode("utf-8"))
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn):
+    """이전 버전 DB에 새 컬럼을 추가합니다 (기존 데이터는 그대로)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if "sso_subject" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN sso_subject TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_sso ON users (sso_subject)")
 
 
 def upsert_admin(conn, email, name):

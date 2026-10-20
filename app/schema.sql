@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     employee_no TEXT NOT NULL DEFAULT '',
     role        TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff')),
     is_active   INTEGER NOT NULL DEFAULT 1,
+    sso_subject TEXT,                                    -- Microsoft 계정 고유값(oidc:<oid>), 첫 로그인 때 연결
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );

@@ -3,7 +3,7 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <h1>직원 관리</h1>
-<p class="muted">등록된 직원만 회사 메일 인증으로 로그인할 수 있고, 상품권 수령자로 선택할 수 있습니다. 퇴사자는 삭제하지 않고 '사용' 체크를 해제하세요 (기존 대장 기록 보존).</p>
+<p class="muted">등록된 직원만 회사 Microsoft 365 계정으로 로그인할 수 있고, 상품권 수령자로 선택할 수 있습니다. 퇴사자는 삭제하지 않고 '사용' 체크를 해제하세요 (기존 대장 기록 보존).</p>
 
 <div class="grid2 top">
   <section class="panel">
@@ -21,11 +21,12 @@
     </form>
   </section>
   <section class="panel">
-    <h2>CSV 일괄 등록</h2>
-    <p class="muted small">엑셀에서 <code>이메일, 성명, 부서, 사번, 권한(선택: 관리자)</code> 순서로 작성 후 CSV로 저장해 올리세요. 첫 줄 머리글은 자동으로 건너뜁니다. 이미 있는 메일은 성명/부서/사번이 갱신됩니다.</p>
+    <h2>엑셀 일괄 등록</h2>
+    <p class="muted small"><a href="{{ url_for('admin.user_export') }}">⬇ 현재 명단 엑셀로 받기</a> → <code>이메일, 성명, 부서, 사번, 권한(관리자)</code> 칸을 채워 다시 올리세요.
+      첫 줄 머리글은 건너뜁니다. 이미 있는 메일은 성명/부서/사번이 갱신되고, 엑셀에 없는 직원은 지워지지 않습니다. (CSV도 가능)</p>
     <form method="post" action="{{ url_for('admin.user_import') }}" enctype="multipart/form-data" class="row">
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-      <input type="file" name="file" accept=".csv,text/csv" required>
+      <input type="file" name="file" accept=".xlsx,.csv" required>
       <button class="btn">업로드</button>
     </form>
   </section>
@@ -33,7 +34,7 @@
 
 <div class="sheet-wrap">
 <table class="sheet edit-table">
-  <thead><tr><th>ID</th><th>회사 메일</th><th>성명</th><th>부서</th><th>사번</th><th>권한</th><th>사용</th><th class="num">수령건수</th><th>등록일</th><th></th></tr></thead>
+  <thead><tr><th>ID</th><th>회사 메일</th><th>성명</th><th>부서</th><th>사번</th><th>권한</th><th>사용</th><th>MS 계정</th><th class="num">수령건수</th><th>등록일</th><th></th></tr></thead>
   <tbody>
   {% for u in users %}
     <tr class="{{ 'void' if not u.is_active }}">
@@ -49,6 +50,7 @@
         </select>
       </td>
       <td class="center"><input form="u-{{ u.id }}" type="checkbox" name="is_active" value="1" {{ 'checked' if u.is_active }}></td>
+      <td class="center small">{{ '연결됨' if u.sso_subject else '' }}</td>
       <td class="num">{{ u.received }}</td>
       <td class="small">{{ u.created_at[:10] }}</td>
       <td>

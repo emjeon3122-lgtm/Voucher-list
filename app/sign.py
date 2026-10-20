@@ -20,6 +20,8 @@ def _handle(req, self_url):
     if current_app.config["SIGN_REQUIRE_LOGIN"] and (g.user is None or g.user["id"] != req["recipient_id"]):
         if g.user is not None:
             return _invalid("이 서명 요청은 다른 직원에게 발송된 것입니다. 본인 계정으로 로그인하세요.", 403)
+        if current_app.config["AUTH_MODE"] == "oidc":  # 바로 Microsoft 로그인으로 → 끝나면 이 서명 화면으로 복귀
+            return redirect(url_for("auth.oidc_login", next=self_url))
         flash("본인 확인을 위해 회사 메일 인증 후 서명할 수 있습니다.", "info")
         return redirect(url_for("auth.login", next=self_url))
 

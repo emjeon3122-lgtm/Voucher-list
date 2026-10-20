@@ -1,12 +1,13 @@
 import logging
 import os
-import sqlite3
 from datetime import timedelta
 
 import click
 from flask import Flask, render_template
 
-from .config import Config
+from .config import Config, check_production
+
+VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VERSION")
 
 
 def create_app(overrides=None):
@@ -14,12 +15,18 @@ def create_app(overrides=None):
     app.config.from_object(Config)
     if overrides:
         app.config.update(overrides)
+    check_production(app.config)
+    try:
+        with open(VERSION_FILE, encoding="utf-8") as fh:
+            app.config["VERSION"] = fh.read().strip()
+    except OSError:
+        app.config["VERSION"] = "dev"
     os.makedirs(os.path.join(app.config["DATA_DIR"], "signatures"), exist_ok=True)
     app.permanent_session_lifetime = timedelta(hours=app.config["SESSION_HOURS"])
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    if app.config["SECRET_KEY"] == "dev-insecure-change-me":
-        app.logger.warning("SECRET_KEY 가 기본값입니다. 운영 환경에서는 반드시 .env 에서 변경하세요.")
+    app.logger.info("상품권 수불 관리 %s 시작 (로그인: %s, 메일: %s)", app.config["VERSION"],
+                    app.config["AUTH_MODE"], app.config["MAIL_BACKEND"])
     if app.config["TRUST_PROXY"]:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -36,7 +43,8 @@ def create_app(overrides=None):
 
     @app.context_processor
     def _globals():
-        return dict(app_name=app.config["APP_NAME"], company_name=app.config["COMPANY_NAME"])
+        return dict(app_name=app.config["APP_NAME"], company_name=app.config["COMPANY_NAME"],
+                    app_version=app.config["VERSION"])
 
     for code in (400, 403, 404, 410, 413, 429, 500):
         app.register_error_handler(code, _error_page)
@@ -78,15 +86,7 @@ def _register_cli(app):
 
     @app.cli.command("backup")
     def backup():
-        """DB 온라인 백업:  flask --app wsgi backup  →  data/backups/voucher_YYYYmmdd_HHMMSS.db"""
-        from .db import db_path
+        """지금 DB 사본 만들기:  flask --app wsgi backup  →  data/backups/manual-YYYYmmdd-HHMMSS.db"""
+        from .backup import make_backup
         from .utils import now
-        out_dir = os.path.join(app.config["DATA_DIR"], "backups")
-        os.makedirs(out_dir, exist_ok=True)
-        out = os.path.join(out_dir, f"voucher_{now():%Y%m%d_%H%M%S}.db")
-        src, dst = sqlite3.connect(db_path()), sqlite3.connect(out)
-        with dst:
-            src.backup(dst)
-        src.close()
-        dst.close()
-        click.echo(f"백업 완료: {out}")
+        click.echo(f"백업 완료: {make_backup(app.config, f'manual-{now():%Y%m%d-%H%M%S}.db')}")

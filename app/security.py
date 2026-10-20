@@ -1,7 +1,7 @@
 import hmac
 import secrets
 
-from flask import abort, request, session
+from flask import abort, current_app, request, session
 
 
 def csrf_token():
@@ -24,10 +24,17 @@ def init_app(app):
 
     @app.after_request
     def _security_headers(resp):
-        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-        resp.headers.setdefault("X-Frame-Options", "DENY")
+        h = resp.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
         # 서명 링크 토큰이 외부 사이트로 새어나가지 않도록
-        resp.headers.setdefault("Referrer-Policy", "same-origin")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if request.endpoint != "static":
+            h.setdefault("Cache-Control", "no-store")  # 로그아웃 후 뒤로가기로 대장이 보이지 않게
+        if current_app.config["SESSION_COOKIE_SECURE"]:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000")
         resp.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "

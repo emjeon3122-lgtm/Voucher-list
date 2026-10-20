@@ -3,7 +3,7 @@ import csv
 import io
 import re
 
-from flask import Blueprint, current_app, flash, g, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, send_file, url_for
 
 from .auth import EMAIL_RE, admin_required
 from .db import get_db, write_tx
@@ -90,23 +90,68 @@ def user_update(uid):
     return redirect(url_for("admin.users"))
 
 
+ROSTER_HEADERS = ["이메일", "성명", "부서", "사번", "권한"]
+
+
+def _roster_rows(file):
+    """업로드한 명단(.xlsx 또는 .csv)의 행 목록. 형식 오류는 ValueError."""
+    raw = file.read()
+    if file.filename.lower().endswith(".xlsx"):
+        from openpyxl import load_workbook
+        try:
+            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("엑셀 파일을 읽을 수 없습니다.") from e
+        ws = wb.worksheets[0]
+        rows = [["" if v is None else str(v).strip() for v in r] for r in ws.iter_rows(max_row=5000, values_only=True)]
+        wb.close()
+        return rows
+    for enc in ("utf-8-sig", "cp949"):
+        try:
+            return list(csv.reader(io.StringIO(raw.decode(enc))))
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("파일 인코딩을 읽을 수 없습니다. 엑셀(.xlsx) 또는 CSV 로 저장하세요.")
+
+
+@bp.get("/users/export.xlsx")
+@admin_required
+def user_export():
+    """현재 직원 명단을 업로드 양식 그대로 내려받기 (고쳐서 다시 올리면 반영)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "직원명단"
+    ws.append(ROSTER_HEADERS + ["사용", "Microsoft 계정 연결"])
+    for c in ws[1]:
+        c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F4E78")
+    for u in get_db().execute("SELECT * FROM users ORDER BY is_active DESC, name").fetchall():
+        ws.append([u["email"], u["name"], u["department"], u["employee_no"],
+                   "관리자" if u["role"] == "admin" else "", "" if u["is_active"] else "중지",
+                   "연결됨" if u["sso_subject"] else ""])
+    for col, w in zip("ABCDEFG", (28, 12, 16, 10, 8, 6, 16)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return send_file(bio, as_attachment=True, download_name=f"직원명단_{now_str()[:10].replace('-', '')}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @bp.post("/users/import")
 @admin_required
 def user_import():
-    """CSV 일괄 등록: 이메일,성명,부서,사번[,권한] (엑셀에서 'CSV UTF-8' 또는 일반 CSV로 저장)"""
+    """명단 일괄 등록: 이메일, 성명, 부서, 사번[, 권한] — 엑셀(.xlsx) 또는 CSV. 없는 직원은 지우지 않습니다."""
     file = request.files.get("file")
     if not file or not file.filename:
-        flash("CSV 파일을 선택하세요.", "error")
+        flash("엑셀(.xlsx) 또는 CSV 파일을 선택하세요.", "error")
         return redirect(url_for("admin.users"))
-    raw = file.read()
-    for enc in ("utf-8-sig", "cp949"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        flash("파일 인코딩을 읽을 수 없습니다. UTF-8 또는 CP949(엑셀 기본) CSV로 저장하세요.", "error")
+    try:
+        rows = _roster_rows(file)
+    except ValueError as e:
+        flash(str(e), "error")
         return redirect(url_for("admin.users"))
 
     db = get_db()
@@ -114,10 +159,10 @@ def user_import():
     errors = []
     ts = now_str()
     with write_tx(db):
-        for lineno, row in enumerate(csv.reader(io.StringIO(text)), start=1):
+        for lineno, row in enumerate(rows, start=1):
             if not row or not any(c.strip() for c in row) or "@" not in row[0]:
                 continue  # 빈 줄 / 머리글
-            cols = (row + [""] * 5)[:5]
+            cols = (list(row) + [""] * 5)[:5]
             role_raw = cols[4].strip().lower()
             form = dict(email=cols[0], name=cols[1], department=cols[2], employee_no=cols[3],
                         role="admin" if role_raw in ("admin", "관리자") else "staff")
@@ -127,7 +172,7 @@ def user_import():
                 errors.append(f"{lineno}행: {e}")
                 continue
             exists = db.execute("SELECT id FROM users WHERE email = ?", (u["email"],)).fetchone()
-            if exists:  # 기존 직원은 이름/부서/사번만 갱신 (권한은 화면에서 직접 변경)
+            if exists:  # 기존 직원은 이름/부서/사번만 갱신 (권한·사용 여부는 화면에서 직접 변경)
                 db.execute("UPDATE users SET name=?, department=?, employee_no=?, updated_at=? WHERE id=?",
                            (u["name"], u["department"], u["employee_no"], ts, exists["id"]))
                 updated += 1
@@ -139,7 +184,7 @@ def user_import():
                 )
                 added += 1
         audit(db, "USER_IMPORT", file.filename, f"추가 {added}, 갱신 {updated}, 오류 {len(errors)}")
-    flash(f"CSV 등록 결과: 신규 {added}명, 갱신 {updated}명", "success")
+    flash(f"명단 등록 결과: 신규 {added}명, 갱신 {updated}명", "success")
     for e in errors[:20]:
         flash(e, "error")
     return redirect(url_for("admin.users"))

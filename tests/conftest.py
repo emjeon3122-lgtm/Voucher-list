@@ -20,7 +20,9 @@ def app(tmp_path):
         "CSRF_DISABLED": True,
         "ADMIN_EMAILS": "",
         "ALLOWED_EMAIL_DOMAINS": [],
-        "BASE_URL": "http://nas.test",
+        "PUBLIC_URL": "http://nas.test",
+        "AUTH_MODE": "email",
+        "SIGN_REQUIRE_LOGIN": False,
     })
     with app.app_context():
         conn = connect(db_path(app))

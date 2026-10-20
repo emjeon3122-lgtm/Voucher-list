@@ -29,7 +29,7 @@ def send_request_mails(results):
     cfg = current_app.config
     messages = []
     for r in results:
-        link = f"{cfg['BASE_URL']}{url_for('sign.by_token', t=r['token'])}"
+        link = f"{cfg['PUBLIC_URL']}{url_for('sign.by_token', t=r['token'])}"
         msg = mailer.build(
             r["email"],
             f"[{cfg['APP_NAME']}] 상품권 수령 확인 서명 요청 ({r['name']}님)",
@@ -41,10 +41,10 @@ def send_request_mails(results):
         mailer.send_sign_requests(messages, now_str())
 
 
-@bp.get("/healthz")
+@bp.route("/healthz", methods=["GET", "HEAD"])
 def healthz():
     get_db().execute("SELECT 1").fetchone()
-    return "ok"
+    return "ok", 200, {"X-App-Version": current_app.config["VERSION"], "Content-Type": "text/plain"}
 
 
 @bp.get("/favicon.ico")

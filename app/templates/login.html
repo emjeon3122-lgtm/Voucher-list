@@ -4,14 +4,22 @@
 {% block content %}
 <div class="panel">
   <h1>로그인</h1>
-  <p class="muted">회사 메일(아웃룩) 주소를 입력하면 6자리 인증코드가 메일로 발송됩니다.</p>
-  <form method="post" action="{{ url_for('auth.login') }}" class="stack">
-    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
-    <label>회사 메일 주소
-      <input type="email" name="email" value="{{ email or '' }}" placeholder="name@company.co.kr" autocomplete="email" required autofocus>
-    </label>
-    <button class="btn primary block">인증코드 받기</button>
-  </form>
+  {% if mode == 'oidc' %}
+    <p class="muted">회사 Microsoft 365(Outlook) 계정으로 로그인합니다.<br>직원 명단에 등록된 계정만 사용할 수 있습니다.</p>
+    <a class="btn primary block big ms-login" href="{{ url_for('auth.oidc_login', next=next) if next else url_for('auth.oidc_login') }}">
+      <span class="ms-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      Microsoft 365 계정으로 로그인
+    </a>
+  {% else %}
+    <p class="muted">회사 메일(아웃룩) 주소를 입력하면 6자리 인증코드가 메일로 발송됩니다.</p>
+    <form method="post" action="{{ url_for('auth.login') }}" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      <label>회사 메일 주소
+        <input type="email" name="email" value="{{ email or '' }}" placeholder="name@company.co.kr" autocomplete="email" required autofocus>
+      </label>
+      <button class="btn primary block">인증코드 받기</button>
+    </form>
+  {% endif %}
 </div>
 {% endblock %}
