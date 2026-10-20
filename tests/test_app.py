@@ -3,10 +3,10 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from app.db import connect, db_path
-from conftest import login, sign_link, signature_data_url
+from conftest import sign_link, signature_data_url
 
 T50, T10 = 1, 2  # voucher_types id
-KIM, LEE = 2, 3  # users id
+KIM, KIM2, LEE = "oid-kim", "oid-kim2", "oid-lee"  # 회사 주소록 ID (김철수 동명이인 2명)
 
 
 def q(app, sql, *args):
@@ -22,7 +22,7 @@ def add_in(c, qty, type_id=T50, date="2026-01-05"):
 
 
 def add_out(c, qty, recipient=KIM, type_id=T50, date="2026-01-10", send=False):
-    data = {"txn_date": date, "voucher_type_id": type_id, "quantity": qty, "recipient_id": recipient,
+    data = {"txn_date": date, "voucher_type_id": type_id, "quantity": qty, "recipient_oid": recipient,
             "purpose": "포상"}
     if send:
         data["send_request"] = "1"

@@ -1,16 +1,18 @@
 -- 상품권 수불 관리 DB 스키마 (SQLite)
 -- 앱 시작 시 자동 실행되며, 이미 존재하는 테이블은 건드리지 않습니다.
 
--- 직원 (로그인 계정 = 회사 메일 주소)
+-- 사람: 관리자(로그인) + 상품권을 받은 직원(회사 주소록에서 고른 사람이 자동 저장됨). 직접 관리하지 않습니다.
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     email       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     name        TEXT NOT NULL,
     department  TEXT NOT NULL DEFAULT '',
     employee_no TEXT NOT NULL DEFAULT '',
-    role        TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff')),
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    sso_subject TEXT,                                    -- Microsoft 계정 고유값(oidc:<oid>), 첫 로그인 때 연결
+    job_title   TEXT NOT NULL DEFAULT '',
+    role        TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'staff')),   -- admin: ADMIN_EMAILS 로 동기화
+    is_active   INTEGER NOT NULL DEFAULT 1,                                          -- 0: 주소록에서 사용 중지(퇴사)
+    directory_id TEXT,                                   -- 회사 주소록(Entra ID) 사용자 ID — 동명이인 구분
+    sso_subject TEXT,                                    -- 관리자 Microsoft 로그인 고유값(oidc:<oid>)
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -39,6 +41,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     counterparty    TEXT NOT NULL DEFAULT '',            -- 입고: 구매처
     giver_id        INTEGER REFERENCES users(id),        -- 지급자(담당자)
     recipient_id    INTEGER REFERENCES users(id),        -- 수령자 (출고)
+    rcpt_name       TEXT,                                -- 지급 당시 수령자 성명·메일·부서 (이후 이동·퇴사해도 기록 유지)
+    rcpt_email      TEXT,
+    rcpt_dept       TEXT,
     purpose         TEXT NOT NULL DEFAULT '',            -- 용도 / 비고
     sign_status     TEXT NOT NULL DEFAULT 'NONE'
                     CHECK (sign_status IN ('NONE', 'UNREQUESTED', 'REQUESTED', 'SIGNED')),

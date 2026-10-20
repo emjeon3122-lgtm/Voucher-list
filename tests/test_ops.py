@@ -2,14 +2,11 @@
 import json
 import os
 from datetime import datetime
-from io import BytesIO
 
 import pytest
-from openpyxl import Workbook, load_workbook
 
-from app import backup, create_app, mailer
+from app import backup, create_app, directory, graph, mailer
 from app.config import check_production
-from conftest import login
 
 
 def test_production_config_refuses_weak_settings(tmp_path):
@@ -25,7 +22,8 @@ def test_production_config_ok():
         "SECRET_KEY": "x" * 48, "AUTH_MODE": "oidc", "OIDC_TENANT_ID": "t", "OIDC_ISSUER": "", "OIDC_CLIENT_ID": "c",
         "OIDC_CLIENT_SECRET": "s", "PUBLIC_URL": "https://192.168.100.25:7031", "ALLOWED_EMAIL_DOMAINS": ["bdo.kr"],
         "MAIL_BACKEND": "graph", "MAIL_SENDER": "voucher@bdo.kr", "GRAPH_TENANT_ID": "t", "GRAPH_CLIENT_ID": "c",
-        "GRAPH_CLIENT_SECRET": "s", "SMTP_HOST": "",
+        "GRAPH_CLIENT_SECRET": "s", "SMTP_HOST": "", "ADMIN_EMAILS": "eunmin.jeon@bdo.kr:전은민",
+        "DIRECTORY_BACKEND": "graph", "DIRECTORY_FILE": "",
     })
 
 
@@ -52,8 +50,8 @@ def test_graph_mail_backend(app, monkeypatch):
             return FakeResp(json.dumps({"access_token": "tok", "expires_in": 3600}).encode())
         return FakeResp()
 
-    monkeypatch.setattr(mailer.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setitem(mailer._token, "value", None)
+    monkeypatch.setattr(graph.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(graph, "_tokens", {})
     app.config.update(MAIL_BACKEND="graph", MAIL_SENDER="voucher@co.kr", GRAPH_TENANT_ID="t",
                       GRAPH_CLIENT_ID="c", GRAPH_CLIENT_SECRET="s")
     with app.test_request_context():
@@ -82,26 +80,30 @@ def test_daily_backup_and_prune(app):
     assert not os.path.exists(old)  # 보관 기간 지난 사본 삭제
 
 
-def test_roster_excel_roundtrip(app, outbox):
-    c = app.test_client()
-    login(c, outbox, "admin@co.kr")
-    wb = load_workbook(BytesIO(c.get("/admin/users/export.xlsx").data))
-    assert wb.active["A1"].value == "이메일" and wb.active.max_row == 4
+def test_graph_directory_queries(app, monkeypatch):
+    calls = []
 
-    up = Workbook()
-    ws = up.active
-    ws.append(["이메일", "성명", "부서", "사번", "권한"])
-    ws.append(["kim@co.kr", "김철수", "전략팀", "1001", ""])
-    ws.append(["new@co.kr", "신입", "총무팀", "2001", "관리자"])
-    ws.append(["bad-email", "오류", "", "", ""])
-    bio = BytesIO()
-    up.save(bio)
-    bio.seek(0)
-    c.post("/admin/users/import", data={"file": (bio, "명단.xlsx")}, content_type="multipart/form-data")
-    from app.db import connect, db_path
-    conn = connect(db_path(app))
-    got = {r["email"]: (r["department"], r["role"]) for r in conn.execute("SELECT * FROM users")}
-    conn.close()
-    assert got["kim@co.kr"] == ("전략팀", "staff")
-    assert got["new@co.kr"] == ("총무팀", "admin")
-    assert "lee@co.kr" in got  # 엑셀에 없는 직원은 지우지 않음
+    def fake_request(cfg, method, path, payload=None, headers=None):
+        calls.append((method, path, headers))
+        if path.startswith("/users?"):
+            return {"value": [
+                {"id": "a1", "displayName": "김철수", "mail": "kim@co.kr", "department": "영업팀", "accountEnabled": True},
+                {"id": "a2", "displayName": "김철수", "mail": "kim@partner.com", "accountEnabled": True},  # 외부 도메인
+            ]}
+        if path.startswith("/users/missing"):
+            raise graph.GraphError(404, "not found")
+        return {"id": "a1", "displayName": "김철수", "mail": "kim@co.kr", "accountEnabled": False}
+
+    monkeypatch.setattr(graph, "request", fake_request)
+    app.config["DIRECTORY_BACKEND"] = "graph"
+    with app.test_request_context():
+        found = directory.search('김"철')
+        assert [p["email"] for p in found] == ["kim@co.kr"]
+        method, path, headers = calls[0]
+        assert headers == {"ConsistencyLevel": "eventual"}
+        query = path.split("?", 1)[1]
+        assert "%22displayName%3A%EA%B9%80%EC%B2%A0%22" in query  # 따옴표 제거된 검색어
+        assert "accountEnabled%20eq%20true" in query and "userType%20eq%20%27Member%27" in query
+        assert directory.get("missing") is None
+        assert directory.get("a1") is None        # 사용 중지(퇴사)
+        assert directory.get("../etc") is None    # 잘못된 ID 는 조회하지 않음

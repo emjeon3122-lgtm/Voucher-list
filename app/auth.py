@@ -2,7 +2,7 @@
 
 AUTH_MODE=oidc  : Microsoft 365(Entra ID) 회사 계정 로그인 (운영).
 AUTH_MODE=email : 회사 메일로 받은 6자리 인증코드로 로그인 (Entra 앱 등록 전 임시용).
-어느 방식이든 직원 명단에서 '관리자'인 사람(또는 Entra 앱 역할 OIDC_ADMIN_ROLE 을 받은 사람)만 들어올 수 있습니다.
+어느 방식이든 ADMIN_EMAILS 에 적힌 사람(또는 Entra 앱 역할 OIDC_ADMIN_ROLE 을 받은 사람)만 들어올 수 있습니다.
 """
 import functools
 import hmac
@@ -130,10 +130,15 @@ def oidc_callback():
         return redirect(url_for("auth.login"))
 
     db = get_db()
-    # 처음에는 명단의 회사 메일로 찾고, 이후로는 Microsoft 계정 고유값(oid)으로 찾습니다.
+    # 처음에는 회사 메일로 찾고, 이후로는 Microsoft 계정 고유값(oid)으로 찾습니다.
     user = (db.execute("SELECT * FROM users WHERE sso_subject = ?", (ident["subject"],)).fetchone()
             or db.execute("SELECT * FROM users WHERE email = ?", (ident["email"],)).fetchone())
     sso_admin = current_app.config["OIDC_ADMIN_ROLE"] in ident["roles"]
+    if user is None and sso_admin:  # Entra 앱 역할로 지정된 관리자의 첫 로그인
+        with write_tx(db):
+            db.execute("INSERT INTO users (email, name, role, created_at, updated_at) VALUES (?, ?, 'staff', ?, ?)",
+                       (ident["email"], ident["name"], now_str(), now_str()))
+        user = db.execute("SELECT * FROM users WHERE email = ?", (ident["email"],)).fetchone()
     if user is None or not user["is_active"] or not (user["role"] == "admin" or sso_admin):
         current_app.logger.warning("관리자가 아닌 계정의 로그인 시도: %s", ident["email"])
         flash(NOT_ADMIN_MSG.format(email=ident["email"]), "error")

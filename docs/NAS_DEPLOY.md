@@ -21,6 +21,7 @@
 | 로그인 | **관리자만** (Microsoft Entra ID, 허용 도메인 `bdo.kr`). 직원(수령자)은 로그인하지 않고 메일 링크로 서명만 함 |
 | **리디렉션 URI** | **`https://192.168.100.25:7031/auth/callback`** (플랫폼: 웹) |
 | 관리자 | `.env` 의 `ADMIN_EMAILS` (또는 화면에서 권한 '관리자', Entra 앱 역할 `Admin`) |
+| 수령자 찾기 | 회사 주소록 Microsoft Graph (`User.Read.All`) — 직원 명단 관리 없음 |
 | 메일 발송 | Microsoft Graph (`Mail.Send`), 보내는 사서함 1개 |
 | 자료 저장 | `./data` (SQLite DB 파일 1개 + 서명 이미지). 매일 자동 백업 `./data/backups` |
 
@@ -38,8 +39,14 @@
 4. (권장) 엔터프라이즈 애플리케이션 › 이 앱 › 속성 › **할당 필요 = 예**, 사용자 및 그룹에 **관리자 본인만** 할당합니다.
    접속하는 사람이 관리자 한 명뿐이므로, 다른 직원은 Microsoft 로그인 단계에서부터 막힙니다(앱도 관리자 외에는 거부합니다).
    관리자 지정은 `ADMIN_EMAILS` 로 충분하며, 앱 역할 `Admin` 은 관리자를 Entra 에서 관리하고 싶을 때만 만듭니다.
-5. **메일 발송 권한** (서명 요청 메일을 Graph 로 보낼 때)
-   - API 사용 권한 › 권한 추가 › Microsoft Graph › **애플리케이션 권한** › `Mail.Send` › **관리자 동의 허용**
+5. **API 사용 권한** › 권한 추가 › Microsoft Graph › **애플리케이션 권한** 두 개 추가 › **관리자 동의 허용**
+
+   | 권한 | 용도 |
+   |---|---|
+   | `User.Read.All` | 회사 주소록에서 수령자 검색 (이름·메일·부서·직책·재직 여부만 읽음) |
+   | `Mail.Send` | 서명 요청 메일 발송 |
+
+   - 주소록 연동 덕분에 직원 명단을 따로 관리하지 않습니다. 퇴사자(계정 사용 중지)와 게스트는 자동으로 제외됩니다.
    - `Mail.Send` 애플리케이션 권한은 기본적으로 **모든 사서함**으로 보낼 수 있으므로, Exchange Online 에서 보내는 사서함 1개로 제한하세요.
      ```powershell
      # Exchange Online PowerShell — 보내는 사서함만 들어 있는 메일 사용 보안 그룹을 먼저 만든 뒤
@@ -51,7 +58,7 @@
    - 메일 권한을 로그인용 앱에 주고 싶지 않으면 발송 전용 앱을 따로 등록하고 `GRAPH_TENANT_ID/GRAPH_CLIENT_ID/GRAPH_CLIENT_SECRET` 에 넣습니다.
 
 로그인 흐름: Authorization Code + PKCE. ID 토큰 서명(RS256), 발급자, 대상, 만료, nonce, 테넌트(tid), 이메일 도메인을 검사합니다.
-처음 로그인할 때 회사 메일로 명단의 관리자 계정과 연결하고, 이후로는 Microsoft 계정 고유값(oid)으로 찾습니다.
+처음 로그인할 때 회사 메일로 `ADMIN_EMAILS` 의 관리자 계정과 연결하고, 이후로는 Microsoft 계정 고유값(oid)으로 찾습니다.
 
 ## 3. NAS 준비
 
@@ -119,7 +126,7 @@ curl -s -D - -o /dev/null http://127.0.0.1:7030/healthz   # 200, X-App-Version: 
    | 대상 | 용도 | 시점 |
    |---|---|---|
    | `login.microsoftonline.com:443` | 로그인, 메일 발송 토큰 | 상시 |
-   | `graph.microsoft.com:443` | 서명 요청 메일 발송 (`MAIL_BACKEND=graph`) | 상시 |
+   | `graph.microsoft.com:443` | 회사 주소록 검색, 서명 요청 메일 발송 | 상시 |
    | Docker Hub (`registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`) | 기본 이미지 | 설치·업데이트 시 |
    | `pypi.org:443`, `files.pythonhosted.org:443` | 앱 의존성 설치 | 설치·업데이트 시 |
 
@@ -132,12 +139,11 @@ curl -s -D - -o /dev/null http://127.0.0.1:7030/healthz   # 200, X-App-Version: 
 ## 7. 처음 사용
 
 1. `ADMIN_EMAILS` 의 관리자가 `https://192.168.100.25:7031` 에 접속 → **Microsoft 365 계정으로 로그인**
-2. **수령자 명단** › "현재 명단 엑셀로 받기" → 상품권을 받을 직원의 이메일·성명·부서·사번을 채워 올리기 (엑셀에 없는 사람은 지워지지 않음)
-3. **상품권 종류** 에서 권종 등록 (예: 신세계상품권 50,000 / 10,000)
-4. **수불 대장** 에서 입고 → 출고(지급) + 서명 요청
-5. `MAIL_BACKEND=console` 로 시험 중이면 서명 링크가 `docker logs voucher-ledger` 에 나옵니다. 확인 후 `graph` 로 바꾸고 `sudo docker compose up -d`.
+2. **상품권 종류** 에서 권종 등록 (예: 신세계상품권 50,000 / 10,000)
+3. **수불 대장** 에서 입고 → 출고(지급): 수령자 이름을 쳐서 주소록에서 고르기 → 서명 요청
+4. `MAIL_BACKEND=console` 로 시험 중이면 서명 링크가 `docker logs voucher-ledger` 에 나옵니다. 확인 후 `graph` 로 바꾸고 `sudo docker compose up -d`.
 
-직원은 메일의 링크를 누르면 로그인 없이 바로 서명 화면이 열립니다. 수령 확인 동의, 본인 성명 입력(명단의 성명과 같아야 함), 서명 순서입니다.
+직원은 메일의 링크를 누르면 로그인 없이 바로 서명 화면이 열립니다. 수령 확인 동의, 본인 성명 입력(주소록의 이름과 같아야 함), 서명 순서입니다.
 
 ## 8. 백업과 복구
 
@@ -171,10 +177,11 @@ DB 구조 변경은 시작할 때 자동 적용되고 기존 자료는 그대로
 | `Permission denied: /data` | `data` 폴더 소유자가 `APP_UID:APP_GID` 인지 (3번) |
 | 로그인 버튼 → "Microsoft 로그인 서버에 연결할 수 없습니다" | NAS 에서 `login.microsoftonline.com:443` 나가는 연결, `OIDC_TENANT_ID` |
 | Microsoft 화면에서 `AADSTS50011` | Entra 리디렉션 URI 가 `PUBLIC_URL` + `/auth/callback` 과 글자 하나까지 같은지 |
-| "관리자 계정이 아닙니다" | 수령자 명단에서 그 계정의 권한이 '관리자'이고 '사용' 체크인지 (또는 `ADMIN_EMAILS`) |
+| "관리자 계정이 아닙니다" | `.env` 의 `ADMIN_EMAILS` 에 그 메일이 있는지 (바꾼 뒤 `sudo docker compose up -d`) |
+| 수령자 검색 → "회사 주소록을 조회할 수 없습니다" | `User.Read.All` 관리자 동의, NAS 에서 `graph.microsoft.com:443` 나가는 연결 |
+| 찾는 직원이 검색되지 않음 | Entra 에서 계정 사용 중지·게스트가 아닌지, 메일 도메인이 `ALLOWED_EMAIL_DOMAINS` 인지 |
 | 대장에 '메일오류' | 배지에 마우스를 올리면 사유. `403`: Mail.Send 관리자 동의 / 사서함 제한 정책. `401`: 클라이언트 암호 만료. 고친 뒤 해당 행 체크 → '서명 요청' 다시 |
 | 휴대폰에서 서명 링크가 안 열림 | 회사 Wi-Fi 또는 VPN 연결 |
-| 관리자가 아무도 없음 | `sudo docker exec voucher-ledger flask --app wsgi create-admin 메일@bdo.kr 이름` |
 
 ## 부록: Entra 앱 등록 전 임시 운영
 

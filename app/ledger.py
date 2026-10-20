@@ -4,11 +4,12 @@ import os
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request,
                    send_file, url_for)
 
-from . import mailer
+from . import directory, mailer
 from .auth import admin_required
 from .db import get_db
 from .services import (LedgerError, create_sign_requests, create_transaction, export_xlsx, ledger_rows,
-                       ledger_totals, ledger_version, signature_dir, stock_summary, void_transaction)
+                       ledger_totals, ledger_version, refresh_people, signature_dir, stock_summary,
+                       void_transaction)
 from .utils import now_str, safe_next, today_str
 
 bp = Blueprint("ledger", __name__)
@@ -75,7 +76,6 @@ def index():
         total_qty=sum(s["qty"] for s in stock), total_balance=sum(s["balance"] for s in stock),
         requested=counts["requested"] or 0, unrequested=counts["unrequested"] or 0,
         types=db.execute("SELECT * FROM voucher_types ORDER BY sort_order, name, face_value DESC").fetchall(),
-        users=db.execute("SELECT * FROM users WHERE is_active = 1 ORDER BY name, email").fetchall(),
         stock_by_type={s["id"]: s["qty"] for s in stock},
         today=today_str(), version=ledger_version(db),
     )
@@ -97,8 +97,13 @@ def add_in():
 def add_out():
     db = get_db()
     try:
-        txn_id = create_transaction(db, "OUT", request.form, g.user)
-    except LedgerError as e:
+        # 화면에서 보낸 이름·메일은 믿지 않고, 고른 사람의 ID로 회사 주소록을 다시 조회합니다(퇴사자 차단).
+        oid = request.form.get("recipient_oid", "")
+        recipient = directory.get(oid) if oid else None
+        if oid and recipient is None:
+            raise LedgerError("선택한 수령자를 회사 주소록에서 찾을 수 없습니다(퇴사·계정 중지). 다시 검색해 주세요.")
+        txn_id = create_transaction(db, "OUT", request.form, g.user, recipient)
+    except (LedgerError, directory.DirectoryError) as e:
         flash(str(e), "error")
         return _back()
     flash(f"출고(지급) 등록 완료 (No.{txn_id})", "success")
@@ -126,14 +131,38 @@ def void(txn_id):
 @bp.post("/ledger/sign-request")
 @admin_required
 def sign_request():
+    db = get_db()
     try:
-        results = create_sign_requests(get_db(), request.form.getlist("txn_ids"), g.user)
+        recheck_recipients(db, request.form.getlist("txn_ids"))
+        results = create_sign_requests(db, request.form.getlist("txn_ids"), g.user)
         send_request_mails(results)
         names = ", ".join(r["name"] for r in results)
         flash(f"서명 요청 메일 {len(results)}통 발송: {names}", "success")
-    except LedgerError as e:
+    except (LedgerError, directory.DirectoryError) as e:
         flash(str(e), "error")
     return _back()
+
+
+def recheck_recipients(db, txn_ids):
+    """서명 요청 직전에 수령자를 회사 주소록에서 다시 확인합니다 (퇴사·메일 변경 반영)."""
+    ids = [int(x) for x in txn_ids if str(x).isdigit()][:500]
+    if not ids:
+        return
+    rows = db.execute(
+        f"""SELECT DISTINCT u.id, u.directory_id FROM transactions t JOIN users u ON u.id = t.recipient_id
+             WHERE t.id IN ({','.join('?' * len(ids))}) AND u.directory_id IS NOT NULL""", ids,
+    ).fetchall()
+    refresh_people(db, {r["id"]: directory.get(r["directory_id"]) for r in rows})
+
+
+@bp.get("/api/directory/search")
+@admin_required
+def directory_search():
+    try:
+        people = directory.search(request.args.get("q", ""))
+    except directory.DirectoryError as e:
+        return jsonify(error=str(e)), 502
+    return jsonify(results=[{k: p[k] for k in ("id", "name", "email", "department", "job_title")} for p in people])
 
 
 @bp.get("/ledger/export.xlsx")

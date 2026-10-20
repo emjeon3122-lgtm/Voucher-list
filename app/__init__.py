@@ -51,7 +51,7 @@ def create_app(overrides=None):
 
     with app.app_context():
         db.init_db()
-        db.seed_admins()
+        db.sync_admins()
 
     _register_cli(app)
     return app
@@ -72,18 +72,6 @@ def _error_page(e):
 
 
 def _register_cli(app):
-    @app.cli.command("create-admin")
-    @click.argument("email")
-    @click.argument("name")
-    def create_admin(email, name):
-        """관리자 계정 생성/승격:  flask --app wsgi create-admin a@company.co.kr 홍길동"""
-        from .db import connect, db_path, upsert_admin, write_tx
-        conn = connect(db_path())
-        with write_tx(conn):
-            upsert_admin(conn, email, name)
-        conn.close()
-        click.echo(f"관리자 등록 완료: {email} ({name})")
-
     @app.cli.command("backup")
     def backup():
         """지금 DB 사본 만들기:  flask --app wsgi backup  →  data/backups/manual-YYYYmmdd-HHMMSS.db"""

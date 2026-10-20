@@ -16,7 +16,6 @@
         <a href="{{ url_for('ledger.index') }}" class="{{ 'on' if request.endpoint == 'ledger.index' }}">수불 대장</a>
       {% endif %}
       {% if g.user.role == 'admin' %}
-        <a href="{{ url_for('admin.users') }}" class="{{ 'on' if request.endpoint and request.endpoint.startswith('admin.user') }}">수령자 명단</a>
         <a href="{{ url_for('admin.types') }}" class="{{ 'on' if request.endpoint and request.endpoint.startswith('admin.type') }}">상품권 종류</a>
         <a href="{{ url_for('admin.audit_log') }}" class="{{ 'on' if request.endpoint == 'admin.audit_log' }}">감사 로그</a>
       {% endif %}

@@ -6,20 +6,17 @@ MAIL_BACKEND
   console : 발송하지 않고 서버 로그에 출력 (초기 설치/시험용)
   memory  : app.extensions["outbox"] 에 보관 (자동 테스트용)
 """
-import json
 import logging
 import smtplib
 import ssl
 import threading
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
 from flask import current_app, render_template
 
+from . import graph
 from .db import connect, db_path
 
 log = logging.getLogger(__name__)
@@ -28,9 +25,6 @@ _SETTING_KEYS = (
     "MAIL_BACKEND", "MAIL_SENDER", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
     "SMTP_STARTTLS", "SMTP_SSL", "SMTP_TLS_VERIFY", "GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET",
 )
-GRAPH_URL = "https://graph.microsoft.com/v1.0"
-_token_lock = threading.Lock()
-_token = {"value": None, "exp": 0.0}
 
 
 def build(to, subject, template, **ctx):
@@ -48,52 +42,25 @@ def build(to, subject, template, **ctx):
     return msg
 
 
-def _graph_token(s):
-    """앱 전용(client credentials) 토큰. 만료 5분 전까지 재사용합니다."""
-    with _token_lock:
-        if _token["value"] and _token["exp"] - 300 > time.time():
-            return _token["value"]
-        url = f"https://login.microsoftonline.com/{s['GRAPH_TENANT_ID']}/oauth2/v2.0/token"
-        body = urllib.parse.urlencode({
-            "grant_type": "client_credentials", "client_id": s["GRAPH_CLIENT_ID"],
-            "client_secret": s["GRAPH_CLIENT_SECRET"], "scope": "https://graph.microsoft.com/.default",
-        }).encode("ascii")
-        with urllib.request.urlopen(urllib.request.Request(url, data=body), timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        _token.update(value=data["access_token"], exp=time.time() + int(data.get("expires_in", 3600)))
-        return _token["value"]
-
-
-def _graph_send(s, token, msg):
-    payload = {
-        "message": {
-            "subject": str(msg["Subject"]),
-            "body": {"contentType": "HTML", "content": msg.get_body(("html",)).get_content()},
-            "toRecipients": [{"emailAddress": {"address": str(msg["To"])}}],
-        },
-        "saveToSentItems": True,
-    }
-    url = f"{GRAPH_URL}/users/{urllib.parse.quote(s['MAIL_SENDER'])}/sendMail"
-    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST", headers={
-        "Authorization": f"Bearer {token}", "Content-Type": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=30):
-            pass
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Graph {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from e
-
-
 def _deliver_graph(s, messages):
     try:
-        token = _graph_token(s)
+        graph.token(s)
     except Exception as e:  # noqa: BLE001
         log.exception("Graph 토큰 발급 실패")
         return [], [(tag, f"Microsoft Graph 인증 실패: {e}") for _m, tag in messages]
     sent, failures = [], []
+    path = f"/users/{urllib.parse.quote(s['MAIL_SENDER'])}/sendMail"
     for msg, tag in messages:
+        payload = {
+            "message": {
+                "subject": str(msg["Subject"]),
+                "body": {"contentType": "HTML", "content": msg.get_body(("html",)).get_content()},
+                "toRecipients": [{"emailAddress": {"address": str(msg["To"])}}],
+            },
+            "saveToSentItems": True,
+        }
         try:
-            _graph_send(s, token, msg)
+            graph.request(s, "POST", path, payload)
             sent.append(tag)
         except Exception as e:  # noqa: BLE001
             log.exception("메일 발송 실패: %s", msg["To"])

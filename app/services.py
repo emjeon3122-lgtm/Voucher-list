@@ -94,7 +94,8 @@ WITH base AS (
 SELECT b.*,
        vt.name AS type_name,
        gv.name AS giver_name,
-       rc.name AS recipient_name, rc.email AS recipient_email, rc.department AS recipient_dept,
+       COALESCE(b.rcpt_name, rc.name) AS recipient_name, COALESCE(b.rcpt_email, rc.email) AS recipient_email,
+       COALESCE(b.rcpt_dept, rc.department) AS recipient_dept, rc.job_title AS recipient_title,
        sr.status AS req_status, sr.requested_at, sr.expires_at, sr.mail_sent_at, sr.mail_error,
        sr.signed_at, sr.signer_ip, sr.signature_file, sr.signature_sha256
   FROM base b
@@ -131,7 +132,7 @@ def ledger_rows(db, f):
     if f.get("q"):
         like = f"%{f['q']}%"
         where.append(
-            "(rc.name LIKE ? OR rc.department LIKE ? OR rc.email LIKE ? OR gv.name LIKE ? "
+            "(b.rcpt_name LIKE ? OR b.rcpt_dept LIKE ? OR b.rcpt_email LIKE ? OR gv.name LIKE ? "
             "OR b.purpose LIKE ? OR b.serial_no LIKE ? OR b.counterparty LIKE ? OR vt.name LIKE ?)"
         )
         params.extend([like] * 8)
@@ -181,14 +182,38 @@ def _parse_common(db, form):
     )
 
 
-def _active_user(db, user_id, label):
-    u = db.execute("SELECT * FROM users WHERE id = ? AND is_active = 1", (parse_int(user_id),)).fetchone()
-    if u is None:
-        raise LedgerError(f"{label}를 선택하세요.")
-    return u
+def upsert_person(db, person):
+    """회사 주소록에서 고른 사람을 저장(또는 최신 정보로 갱신)하고 id 를 돌려줍니다. 쓰기 트랜잭션 안에서 호출."""
+    ts = now_str()
+    row = (db.execute("SELECT id FROM users WHERE directory_id = ?", (person["id"],)).fetchone()
+           or db.execute("SELECT id FROM users WHERE email = ? AND directory_id IS NULL", (person["email"],)).fetchone())
+    values = (person["id"], person["email"], person["name"], person["department"], person["job_title"],
+              person["employee_no"], ts)
+    if row:
+        # 메일이 다른 사람에게 넘어간 경우(퇴사자 메일 재사용 등) 옛 기록의 메일을 비워 충돌을 피함
+        db.execute("UPDATE users SET email = email || '#old' || id WHERE email = ? AND id != ?", (person["email"], row["id"]))
+        db.execute("""UPDATE users SET directory_id=?, email=?, name=?, department=?, job_title=?, employee_no=?,
+                             is_active=1, updated_at=? WHERE id=?""", (*values, row["id"]))
+        return row["id"]
+    db.execute("UPDATE users SET email = email || '#old' || id WHERE email = ?", (person["email"],))
+    return db.execute(
+        """INSERT INTO users (directory_id, email, name, department, job_title, employee_no, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (*values, ts),
+    ).lastrowid
 
 
-def create_transaction(db, direction, form, actor):
+def refresh_people(db, people):
+    """주소록에서 다시 확인한 결과를 반영합니다. people: {users.id: 주소록 정보 또는 None(퇴사·사용 중지)}"""
+    with write_tx(db):
+        for user_id, person in people.items():
+            if person is None:
+                db.execute("UPDATE users SET is_active=0, updated_at=? WHERE id=?", (now_str(), user_id))
+            else:
+                upsert_person(db, person)
+
+
+def create_transaction(db, direction, form, actor, recipient=None):
+    """recipient: 출고일 때 회사 주소록에서 확인한 수령자 정보 (directory.get 결과)."""
     data = _parse_common(db, form)
     vt, ts = data["vt"], now_str()
     giver_id = recipient_id = None
@@ -198,12 +223,14 @@ def create_transaction(db, direction, form, actor):
         giver_id = actor["id"]
         sign_status = "NONE"
     else:
-        giver_id = _active_user(db, form.get("giver_id") or actor["id"], "지급자")["id"]
-        recipient_id = _active_user(db, form.get("recipient_id"), "수령자")["id"]
+        if not recipient:
+            raise LedgerError("수령자를 회사 주소록에서 검색해 선택하세요.")
+        giver_id = actor["id"]
         sign_status = "UNREQUESTED"
 
     with write_tx(db):
         if direction == "OUT":
+            recipient_id = upsert_person(db, recipient)
             avail = available_qty(db, vt["id"], data["txn_date"])
             if data["quantity"] > avail:
                 raise LedgerError(
@@ -213,17 +240,19 @@ def create_transaction(db, direction, form, actor):
         cur = db.execute(
             """
             INSERT INTO transactions (txn_date, direction, voucher_type_id, quantity, face_value, amount,
-                                      serial_no, counterparty, giver_id, recipient_id, purpose, sign_status,
-                                      created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      serial_no, counterparty, giver_id, recipient_id, rcpt_name, rcpt_email, rcpt_dept,
+                                      purpose, sign_status, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (data["txn_date"], direction, vt["id"], data["quantity"], vt["face_value"],
              data["quantity"] * vt["face_value"], data["serial_no"], counterparty, giver_id, recipient_id,
+             recipient and recipient["name"], recipient and recipient["email"], recipient and recipient["department"],
              data["purpose"], sign_status, actor["id"], ts, ts),
         )
         txn_id = cur.lastrowid
+        to = f" → {recipient['name']} <{recipient['email']}>" if recipient else ""
         audit(db, "TXN_" + direction, f"txn:{txn_id}",
-              f"{data['txn_date']} {vt['name']} {vt['face_value']:,}원 x {data['quantity']}")
+              f"{data['txn_date']} {vt['name']} {vt['face_value']:,}원 x {data['quantity']}{to}")
     return txn_id
 
 
@@ -286,7 +315,8 @@ def create_sign_requests(db, txn_ids, actor):
             if r["sign_status"] == "SIGNED":
                 raise LedgerError(f"{label}: 이미 서명이 완료된 내역입니다.")
             if not r["recipient_active"]:
-                raise LedgerError(f"{label}: 수령자 계정이 비활성 상태입니다.")
+                raise LedgerError(f"{label}: {r['recipient_name']}님은 회사 주소록에서 퇴사(계정 사용 중지)로 확인되어 "
+                                  f"메일을 보낼 수 없습니다.")
 
         groups = {}
         for r in rows:

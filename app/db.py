@@ -55,12 +55,31 @@ def init_db():
         conn.close()
 
 
+_NEW_COLUMNS = {  # 이전 버전 DB에 없을 수 있는 컬럼
+    "users": ["sso_subject TEXT", "directory_id TEXT", "job_title TEXT NOT NULL DEFAULT ''"],
+    "transactions": ["rcpt_name TEXT", "rcpt_email TEXT", "rcpt_dept TEXT"],
+}
+
+
 def _migrate(conn):
     """이전 버전 DB에 새 컬럼을 추가합니다 (기존 데이터는 그대로)."""
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    if "sso_subject" not in cols:
-        conn.execute("ALTER TABLE users ADD COLUMN sso_subject TEXT")
+    for table, columns in _NEW_COLUMNS.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col in columns:
+            if col.split()[0] not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_sso ON users (sso_subject)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_dir ON users (directory_id)")
+
+
+def admin_entries(cfg):
+    """ADMIN_EMAILS (예: a@bdo.kr:홍길동,b@bdo.kr) → [(메일, 성명)]"""
+    out = []
+    for entry in (e.strip() for e in cfg.get("ADMIN_EMAILS", "").split(",")):
+        if entry:
+            email, _, name = entry.partition(":")
+            out.append((email.strip().lower(), name.strip()))
+    return out
 
 
 def upsert_admin(conn, email, name):
@@ -76,20 +95,19 @@ def upsert_admin(conn, email, name):
         )
 
 
-def seed_admins():
-    """ADMIN_EMAILS (예: a@co.kr:홍길동,b@co.kr) 에 지정된 계정을 관리자로 등록합니다."""
-    spec = current_app.config.get("ADMIN_EMAILS", "")
-    entries = [e.strip() for e in spec.split(",") if e.strip()]
+def sync_admins():
+    """ADMIN_EMAILS 가 관리자 목록의 기준입니다: 적힌 사람은 관리자로, 빠진 사람은 관리자에서 해제합니다."""
+    entries = admin_entries(current_app.config)
     if not entries:
         return
     conn = connect(db_path())
     try:
         with write_tx(conn):
-            for entry in entries:
-                email, _, name = entry.partition(":")
-                exists = conn.execute("SELECT 1 FROM users WHERE email = ?", (email.strip().lower(),)).fetchone()
-                if not exists:  # 이미 있는 계정은 관리자 화면에서 바꾼 권한을 존중
-                    upsert_admin(conn, email, name.strip())
+            for email, name in entries:
+                upsert_admin(conn, email, name)
+            marks = ",".join("?" * len(entries))
+            conn.execute(f"UPDATE users SET role='staff', updated_at=? WHERE role='admin' AND email NOT IN ({marks})",
+                         [now_str(), *(e for e, _n in entries)])
     finally:
         conn.close()
 

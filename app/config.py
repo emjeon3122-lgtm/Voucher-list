@@ -47,7 +47,7 @@ class Config:
     # email: 회사 메일로 받은 6자리 인증코드로 로그인 (Entra 앱 등록 전 임시용)
     AUTH_MODE = env("AUTH_MODE", "email").strip().lower()
     ALLOWED_EMAIL_DOMAINS = _list("ALLOWED_EMAIL_DOMAINS")
-    ADMIN_EMAILS = env("ADMIN_EMAILS")  # 관리자(접속할 수 있는 사람). 예: a@bdo.kr:홍길동
+    ADMIN_EMAILS = env("ADMIN_EMAILS")  # 관리자(접속할 수 있는 사람) 목록의 기준. 예: a@bdo.kr:홍길동
     SESSION_HOURS = _int("SESSION_HOURS", 8)
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
@@ -66,6 +66,11 @@ class Config:
 
     # ---- 전자서명 ----
     SIGN_LINK_DAYS = _int("SIGN_LINK_DAYS", 7)
+
+    # ---- 회사 주소록 (수령자 찾기) ----
+    # graph: Microsoft 365 주소록(Entra 앱에 User.Read.All 권한) / file: DIRECTORY_FILE(JSON) — PC 시험용
+    DIRECTORY_BACKEND = env("DIRECTORY_BACKEND", "graph").strip().lower()
+    DIRECTORY_FILE = env("DIRECTORY_FILE")
 
     # ---- 메일 ----
     # graph  : Microsoft Graph API 로 발송 (Microsoft 365 권장, Entra 앱에 Mail.Send 권한 필요)
@@ -117,6 +122,15 @@ def check_production(cfg):
     if cfg["MAIL_BACKEND"] == "graph" and not (cfg["MAIL_SENDER"] and cfg["GRAPH_TENANT_ID"]
                                                and cfg["GRAPH_CLIENT_ID"] and cfg["GRAPH_CLIENT_SECRET"]):
         problems.append("MAIL_BACKEND=graph 이면 MAIL_SENDER 와 Entra 앱 값(OIDC_* 또는 GRAPH_*)이 필요합니다.")
+    if not cfg["ADMIN_EMAILS"].strip():
+        problems.append("ADMIN_EMAILS 에 관리자(접속할 사람) 메일을 지정하세요. 예: eunmin.jeon@bdo.kr:전은민")
+    if cfg["DIRECTORY_BACKEND"] not in ("graph", "file"):
+        problems.append("DIRECTORY_BACKEND 는 graph 또는 file 이어야 합니다.")
+    if cfg["DIRECTORY_BACKEND"] == "graph" and not (cfg["GRAPH_TENANT_ID"] and cfg["GRAPH_CLIENT_ID"]
+                                                    and cfg["GRAPH_CLIENT_SECRET"]):
+        problems.append("회사 주소록(DIRECTORY_BACKEND=graph)을 쓰려면 Entra 앱 값(OIDC_* 또는 GRAPH_*)이 필요합니다.")
+    if cfg["DIRECTORY_BACKEND"] == "file" and not cfg["DIRECTORY_FILE"]:
+        problems.append("DIRECTORY_BACKEND=file 이면 DIRECTORY_FILE 이 필요합니다.")
     if cfg["MAIL_BACKEND"] == "smtp" and not cfg["SMTP_HOST"]:
         problems.append("MAIL_BACKEND=smtp 이면 SMTP_HOST 가 필요합니다.")
     if problems:

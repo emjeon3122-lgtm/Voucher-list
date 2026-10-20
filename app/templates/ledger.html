@@ -111,7 +111,7 @@
       <td class="ellipsis" title="{{ r.serial_no }}">{{ r.serial_no }}</td>
       <td class="ellipsis" title="{{ r.counterparty }}">{{ r.counterparty }}</td>
       <td class="nowrap">{{ r.giver_name or '' }}</td>
-      <td class="nowrap" title="{{ r.recipient_email or '' }}">{{ r.recipient_name or '' }}</td>
+      <td class="nowrap" title="{{ r.recipient_email or '' }}{% if r.recipient_title %} · {{ r.recipient_title }}{% endif %}">{{ r.recipient_name or '' }}</td>
       <td class="nowrap">{{ r.recipient_dept or '' }}</td>
       <td class="ellipsis" title="{{ r.purpose }}{% if r.is_void %} / 취소사유: {{ r.void_reason }}{% endif %}">{{ r.purpose }}</td>
       <td class="nowrap">
@@ -198,21 +198,23 @@
       </label>
       <label>수량(매) <input type="number" name="quantity" min="1" step="1" required class="qty-input"></label>
       <label>금액 <output class="amount-out">0원</output></label>
-      <label>수령자
-        <select name="recipient_id" required>
-          <option value="">선택</option>
-          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}{% if u.department %} ({{ u.department }}){% endif %} · {{ u.email }}</option>{% endfor %}
-        </select>
-      </label>
-      <label>지급자
-        <select name="giver_id">
-          {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if u.id == g.user.id }}>{{ u.name }}{% if u.department %} ({{ u.department }}){% endif %}</option>{% endfor %}
-        </select>
-      </label>
+      <div class="picker span2" data-url="{{ url_for('ledger.directory_search') }}">
+        <label>수령자 — 회사 주소록(Outlook)에서 검색
+          <input type="search" class="picker-input" placeholder="이름 또는 메일 앞부분 (예: 김철수, kim)" autocomplete="off" maxlength="50">
+        </label>
+        <input type="hidden" name="recipient_oid" class="picker-value">
+        <div class="picker-selected" hidden>
+          <span class="picker-chip"></span>
+          <button type="button" class="btn tiny ghost picker-clear">변경</button>
+        </div>
+        <ul class="picker-results" role="listbox"></ul>
+        <p class="picker-msg muted small">재직 중인 직원만 검색됩니다. 동명이인은 부서·직책·메일로 구분하세요.</p>
+      </div>
       <label>일련번호 (선택) <input name="serial_no" maxlength="500"></label>
       <label>용도 <input name="purpose" maxlength="500" placeholder="예: 우수사원 포상"></label>
     </div>
     <label class="check"><input type="checkbox" name="send_request" value="1" checked> 등록 후 바로 수령자에게 <b>서명 요청 메일</b> 발송</label>
+    <p class="muted small">지급자: {{ g.user.name }}</p>
     <div class="dlg-actions">
       <button type="button" class="btn ghost" data-close>닫기</button>
       <button class="btn accent">출고 등록 (−)</button>

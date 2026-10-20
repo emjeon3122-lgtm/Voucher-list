@@ -34,7 +34,10 @@ login_codes, audit_log
 | name / department / employee_no | 성명 / 부서 / 사번 |
 | role | `admin` 관리자(접속 가능), `staff` 수령자(접속 불가). Entra 앱 역할 `Admin` 을 받은 사람도 관리자 |
 | sso_subject | 관리자의 Microsoft 계정 고유값 `oidc:<oid>`. 첫 로그인 때 회사 메일로 연결한 뒤 이 값으로 찾음 |
-| is_active | 0이면 수령자 선택 불가, 관리자는 로그인 불가 (퇴사자는 삭제하지 않고 비활성화) |
+| is_active | 0이면 주소록에서 퇴사(계정 사용 중지)로 확인된 사람 — 서명 요청 불가 (기록은 남음) |
+| directory_id, job_title | 회사 주소록(Entra ID) 사용자 ID·직책. 동명이인을 ID 로 구분 |
+
+`users` 는 직접 관리하지 않습니다. 관리자는 `ADMIN_EMAILS` 와 동기화되고, 수령자는 출고 때 주소록에서 고른 사람이 자동 저장·갱신됩니다.
 
 ### voucher_types: 상품권 종류 + 권종
 | 컬럼 | 설명 |
@@ -53,6 +56,7 @@ login_codes, audit_log
 | serial_no | 일련번호 (선택) |
 | counterparty | 구매처 (입고) |
 | giver_id / recipient_id | 지급자 / 수령자 |
+| rcpt_name, rcpt_email, rcpt_dept | 지급 당시 수령자 성명·메일·부서 (이후 부서 이동·퇴사해도 대장 기록 유지) |
 | purpose | 용도, 비고 |
 | sign_status | `NONE`(입고), `UNREQUESTED` 미요청, `REQUESTED` 서명대기, `SIGNED` 서명완료 |
 | sign_request_id | 최근 서명 요청 (서명 이미지는 이 요청에 저장) |
@@ -100,7 +104,10 @@ SUM(CASE WHEN is_void=1 THEN 0 WHEN direction='IN' THEN amount   ELSE -amount   
 
 ### 전자서명
 ```
-관리자 [서명 요청] ─▶ 수령자별로 signature_requests 생성 (토큰 → 해시 저장)
+관리자 [출고] ─▶ 수령자 이름 검색 → Graph /users ($search, 재직 중·내부 직원만) → 부서·직책·메일로 골라 선택
+            ─▶ 서버가 주소록 ID로 다시 조회(퇴사 차단) → users 저장/갱신, 거래에 당시 정보 기록
+관리자 [서명 요청] ─▶ 수령자를 주소록에서 다시 확인(퇴사면 거부, 메일 변경은 반영)
+                   ─▶ 수령자별로 signature_requests 생성 (토큰 → 해시 저장)
                    ─▶ 출고 행 sign_status = REQUESTED
                    ─▶ 백그라운드로 Graph(또는 SMTP) 메일 발송 (결과는 mail_sent_at / mail_error 에 기록)
 직원 메일 링크 열기 (/sign?t=토큰)
@@ -124,7 +131,8 @@ SUM(CASE WHEN is_void=1 THEN 0 WHEN direction='IN' THEN amount   ELSE -amount   
 
 - 비밀번호를 저장하지 않습니다. 로그인은 Microsoft Entra ID (Authorization Code + PKCE).
   ID 토큰 서명(RS256)·발급자·대상·만료·nonce·테넌트(tid)·이메일 도메인('@' 하나)을 검사하고, state 는 1회용입니다.
-- 관리자가 아닌 계정(수령자, 명단에 없는 사람, 사용 중지)은 회사 계정이어도 로그인할 수 없습니다(로그에 기록).
+- 관리자가 아닌 계정(`ADMIN_EMAILS` 에 없는 사람)은 회사 계정이어도 로그인할 수 없습니다(로그에 기록).
+- 출고 화면이 보낸 수령자 이름·메일은 믿지 않고, 고른 사람의 주소록 ID 로 서버가 다시 조회해 저장합니다.
 - 위험한 설정(짧은 `SESSION_SECRET`, 빈 OIDC 값, https 아닌 `PUBLIC_URL`, 허용 도메인 없음)이면 앱이 시작되지 않습니다.
 - 컨테이너: 일반 계정 실행, 읽기 전용 파일시스템, `no-new-privileges`, `cap_drop: ALL`, 메모리·프로세스 상한, 127.0.0.1 에만 열림.
 - Graph `Mail.Send` 는 Exchange 정책으로 보내는 사서함 1개로 제한합니다(NAS_DEPLOY.md 2-5).
