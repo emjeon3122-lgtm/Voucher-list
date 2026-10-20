@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}직원 관리{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>직원 관리</h1>
+<p class="muted">등록된 직원만 회사 메일 인증으로 로그인할 수 있고, 상품권 수령자로 선택할 수 있습니다. 퇴사자는 삭제하지 않고 '사용' 체크를 해제하세요 (기존 대장 기록 보존).</p>
+
+<div class="grid2 top">
+  <section class="panel">
+    <h2>직원 개별 등록</h2>
+    <form method="post" action="{{ url_for('admin.user_create') }}" class="grid2">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label>회사 메일 <input type="email" name="email" required placeholder="name@company.co.kr"></label>
+      <label>성명 <input name="name" required maxlength="50"></label>
+      <label>부서 <input name="department" maxlength="100"></label>
+      <label>사번 <input name="employee_no" maxlength="50"></label>
+      <label>권한
+        <select name="role"><option value="staff">일반 직원</option><option value="admin">관리자</option></select>
+      </label>
+      <div class="end"><button class="btn primary">등록</button></div>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>CSV 일괄 등록</h2>
+    <p class="muted small">엑셀에서 <code>이메일, 성명, 부서, 사번, 권한(선택: 관리자)</code> 순서로 작성 후 CSV로 저장해 올리세요. 첫 줄 머리글은 자동으로 건너뜁니다. 이미 있는 메일은 성명/부서/사번이 갱신됩니다.</p>
+    <form method="post" action="{{ url_for('admin.user_import') }}" enctype="multipart/form-data" class="row">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="file" name="file" accept=".csv,text/csv" required>
+      <button class="btn">업로드</button>
+    </form>
+  </section>
+</div>
+
+<div class="sheet-wrap">
+<table class="sheet edit-table">
+  <thead><tr><th>ID</th><th>회사 메일</th><th>성명</th><th>부서</th><th>사번</th><th>권한</th><th>사용</th><th class="num">수령건수</th><th>등록일</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr class="{{ 'void' if not u.is_active }}">
+      <td class="num">{{ u.id }}</td>
+      <td><input form="u-{{ u.id }}" type="email" name="email" value="{{ u.email }}" required></td>
+      <td><input form="u-{{ u.id }}" name="name" value="{{ u.name }}" required></td>
+      <td><input form="u-{{ u.id }}" name="department" value="{{ u.department }}"></td>
+      <td><input form="u-{{ u.id }}" name="employee_no" value="{{ u.employee_no }}" class="short"></td>
+      <td>
+        <select form="u-{{ u.id }}" name="role">
+          <option value="staff" {{ 'selected' if u.role == 'staff' }}>직원</option>
+          <option value="admin" {{ 'selected' if u.role == 'admin' }}>관리자</option>
+        </select>
+      </td>
+      <td class="center"><input form="u-{{ u.id }}" type="checkbox" name="is_active" value="1" {{ 'checked' if u.is_active }}></td>
+      <td class="num">{{ u.received }}</td>
+      <td class="small">{{ u.created_at[:10] }}</td>
+      <td>
+        <form id="u-{{ u.id }}" method="post" action="{{ url_for('admin.user_update', uid=u.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn tiny">저장</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

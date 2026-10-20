@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · {{ app_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('ledger.home') }}">🎫 {{ app_name }}{% if company_name %} <small>{{ company_name }}</small>{% endif %}</a>
+    {% if g.user %}
+    <nav>
+      {% if g.user.role == 'admin' %}
+        <a href="{{ url_for('ledger.index') }}" class="{{ 'on' if request.endpoint == 'ledger.index' }}">수불 대장</a>
+      {% endif %}
+      <a href="{{ url_for('ledger.my') }}" class="{{ 'on' if request.endpoint == 'ledger.my' }}">내 수령 내역</a>
+      {% if g.user.role == 'admin' %}
+        <a href="{{ url_for('admin.users') }}" class="{{ 'on' if request.endpoint and request.endpoint.startswith('admin.user') }}">직원 관리</a>
+        <a href="{{ url_for('admin.types') }}" class="{{ 'on' if request.endpoint and request.endpoint.startswith('admin.type') }}">상품권 종류</a>
+        <a href="{{ url_for('admin.audit_log') }}" class="{{ 'on' if request.endpoint == 'admin.audit_log' }}">감사 로그</a>
+      {% endif %}
+    </nav>
+    <div class="me">
+      <span>{{ g.user.name }}{% if g.user.department %} · {{ g.user.department }}{% endif %}</span>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn small ghost">로그아웃</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  <main class="{% block main_class %}container{% endblock %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="flashes">
+        {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

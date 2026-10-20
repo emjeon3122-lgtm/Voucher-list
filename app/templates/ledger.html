@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}수불 관리 대장{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+{% set back = request.full_path %}
+{% set sign_labels = {'NONE': '', 'UNREQUESTED': '미요청', 'REQUESTED': '서명대기', 'SIGNED': '서명완료'} %}
+<div class="page-head">
+  <h1>상품권 수불 관리 대장</h1>
+  <div class="actions">
+    <button type="button" class="btn primary" data-open="dlg-in">＋ 입고(구매) 등록</button>
+    <button type="button" class="btn accent" data-open="dlg-out">－ 출고(지급) 등록</button>
+    <a class="btn" href="{{ url_for('ledger.export', **request.args) }}">⬇ 엑셀 다운로드</a>
+  </div>
+</div>
+
+<section class="cards">
+  <div class="card total">
+    <div class="label">총 잔액</div>
+    <div class="value">{{ total_balance|won }}<small>원</small></div>
+    <div class="sub">재고 합계 {{ total_qty|won }}매</div>
+  </div>
+  {% for s in stock if s.is_active or s.qty %}
+  <div class="card {{ 'empty' if s.qty <= 0 }}">
+    <div class="label">{{ s.name }} · {{ s.face_value|won }}원권</div>
+    <div class="value">{{ s.qty|won }}<small>매</small></div>
+    <div class="sub">{{ s.balance|won }}원 · 입고 {{ s.in_qty|won }} / 출고 {{ s.out_qty|won }}</div>
+  </div>
+  {% else %}
+  <div class="card empty">
+    <div class="label">등록된 상품권 종류가 없습니다</div>
+    <div class="sub"><a href="{{ url_for('admin.types') }}">상품권 종류/권종 추가하기 →</a></div>
+  </div>
+  {% endfor %}
+  <a class="card warn" href="{{ url_for('ledger.index', sign='REQUESTED') }}">
+    <div class="label">서명 대기</div>
+    <div class="value">{{ requested }}<small>건</small></div>
+    <div class="sub">서명 미요청 {{ unrequested }}건</div>
+  </a>
+</section>
+
+<form class="filters" method="get" action="{{ url_for('ledger.index') }}">
+  <label>기간 <input type="date" name="date_from" value="{{ f.date_from }}"></label>
+  <label>~ <input type="date" name="date_to" value="{{ f.date_to }}"></label>
+  <label>종류
+    <select name="type_id">
+      <option value="">전체</option>
+      {% for t in types %}<option value="{{ t.id }}" {{ 'selected' if f.type_id == t.id|string }}>{{ t.name }} {{ t.face_value|won }}원</option>{% endfor %}
+    </select>
+  </label>
+  <label>구분
+    <select name="direction">
+      <option value="">전체</option>
+      <option value="IN" {{ 'selected' if f.direction == 'IN' }}>입고</option>
+      <option value="OUT" {{ 'selected' if f.direction == 'OUT' }}>출고</option>
+    </select>
+  </label>
+  <label>서명
+    <select name="sign">
+      <option value="">전체</option>
+      <option value="UNREQUESTED" {{ 'selected' if f.sign == 'UNREQUESTED' }}>미요청</option>
+      <option value="REQUESTED" {{ 'selected' if f.sign == 'REQUESTED' }}>서명대기</option>
+      <option value="SIGNED" {{ 'selected' if f.sign == 'SIGNED' }}>서명완료</option>
+    </select>
+  </label>
+  <label class="grow">검색 <input type="search" name="q" value="{{ f.q }}" placeholder="수령자, 부서, 용도, 일련번호, 구매처…"></label>
+  <label class="check"><input type="checkbox" name="hide_void" value="1" {{ 'checked' if f.hide_void }}> 취소건 숨김</label>
+  <button class="btn">조회</button>
+  <a class="btn ghost" href="{{ url_for('ledger.index') }}">초기화</a>
+</form>
+
+<form id="bulk-form" method="post" action="{{ url_for('ledger.sign_request') }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="back" value="{{ back }}">
+</form>
+<div class="bulk-bar">
+  <span><b id="sel-count">0</b>건 선택</span>
+  <button class="btn small accent" form="bulk-form" id="bulk-submit" disabled>✉ 선택 건 서명 요청 메일 발송</button>
+  <span class="muted">같은 수령자의 여러 건은 메일 1통으로 묶어 발송합니다. 서명대기 건을 다시 보내면 이전 링크는 무효가 됩니다.</span>
+  <span class="live" id="live-status" data-version="{{ version }}" data-url="{{ url_for('ledger.version') }}">● 실시간 반영 중</span>
+</div>
+
+<div class="sheet-wrap" id="sheet-wrap">
+<table class="sheet">
+  <thead>
+    <tr>
+      <th><input type="checkbox" id="check-all" title="전체 선택"></th>
+      <th>No</th><th>일자</th><th>구분</th><th>상품권 종류</th><th class="num">권종</th><th class="num">수량</th>
+      <th class="num">입고금액</th><th class="num">출고금액</th><th class="num">권종재고</th><th class="num">총잔액</th>
+      <th>일련번호</th><th>구매처</th><th>지급자</th><th>수령자</th><th>부서</th><th>용도/비고</th>
+      <th>서명상태</th><th>서명</th><th>서명일시</th><th>관리</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'void' if r.is_void }} {{ 'in' if r.direction == 'IN' else 'out' }}">
+      <td class="center">
+        {% if r.direction == 'OUT' and not r.is_void and r.sign_status != 'SIGNED' %}
+          <input type="checkbox" class="row-check" name="txn_ids" value="{{ r.id }}" form="bulk-form">
+        {% endif %}
+      </td>
+      <td class="num">{{ r.id }}</td>
+      <td class="nowrap">{{ r.txn_date }}</td>
+      <td><span class="tag {{ 'tag-in' if r.direction == 'IN' else 'tag-out' }}">{{ '입고' if r.direction == 'IN' else '출고' }}</span></td>
+      <td>{{ r.type_name }}</td>
+      <td class="num">{{ r.face_value|won }}</td>
+      <td class="num">{{ r.quantity|won }}</td>
+      <td class="num plus">{{ r.amount|won if r.direction == 'IN' }}</td>
+      <td class="num minus">{{ r.amount|won if r.direction == 'OUT' }}</td>
+      <td class="num strong">{{ r.qty_balance|won }}</td>
+      <td class="num strong">{{ r.amount_balance|won }}</td>
+      <td class="ellipsis" title="{{ r.serial_no }}">{{ r.serial_no }}</td>
+      <td class="ellipsis" title="{{ r.counterparty }}">{{ r.counterparty }}</td>
+      <td class="nowrap">{{ r.giver_name or '' }}</td>
+      <td class="nowrap" title="{{ r.recipient_email or '' }}">{{ r.recipient_name or '' }}</td>
+      <td class="nowrap">{{ r.recipient_dept or '' }}</td>
+      <td class="ellipsis" title="{{ r.purpose }}{% if r.is_void %} / 취소사유: {{ r.void_reason }}{% endif %}">{{ r.purpose }}</td>
+      <td class="nowrap">
+        {% if r.direction == 'OUT' %}
+          <span class="badge s-{{ r.sign_status|lower }}">{{ sign_labels[r.sign_status] }}</span>
+          {% if r.sign_status == 'REQUESTED' %}
+            {% if r.mail_error %}<span class="badge s-error" title="{{ r.mail_error }}">메일오류</span>
+            {% elif not r.mail_sent_at %}<span class="muted small">발송중…</span>{% endif %}
+          {% endif %}
+        {% endif %}
+      </td>
+      <td class="sig">
+        {% if r.sign_status == 'SIGNED' %}
+          <a href="{{ url_for('ledger.signature_image', txn_id=r.id) }}" target="_blank" rel="noopener">
+            <img src="{{ url_for('ledger.signature_image', txn_id=r.id) }}" alt="서명" loading="lazy">
+          </a>
+        {% endif %}
+      </td>
+      <td class="nowrap small">{% if r.sign_status == 'SIGNED' %}<span title="IP {{ r.signer_ip }}">{{ r.signed_at }}</span>{% elif r.sign_status == 'REQUESTED' %}<span class="muted">요청 {{ r.requested_at[:16] }}</span>{% endif %}</td>
+      <td class="nowrap">
+        {% if r.is_void %}
+          <span class="muted small" title="{{ r.void_reason }}">취소됨 {{ (r.voided_at or '')[:10] }}</span>
+        {% else %}
+          <button type="button" class="btn tiny ghost" data-void="{{ r.id }}" data-label="No.{{ r.id }} {{ r.txn_date }} {{ '입고' if r.direction == 'IN' else '출고' }} {{ r.type_name }} {{ r.face_value|won }}원 × {{ r.quantity }}">취소</button>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="21" class="center muted pad">조회된 내역이 없습니다.</td></tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="6" class="right">조회 합계 (취소 제외)</td>
+      <td class="num">입 {{ totals.in_qty|won }} / 출 {{ totals.out_qty|won }}</td>
+      <td class="num plus">{{ totals.in_amount|won }}</td>
+      <td class="num minus">{{ totals.out_amount|won }}</td>
+      <td colspan="12"></td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+
+{# ---------------------------------------------------------------- 입고 등록 #}
+<dialog id="dlg-in">
+  <form method="post" action="{{ url_for('ledger.add_in') }}" class="stack calc-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <h2>입고(구매) 등록</h2>
+    <div class="grid2">
+      <label>입고일자 <input type="date" name="txn_date" value="{{ today }}" max="{{ today }}" required></label>
+      <label>상품권 종류 / 권종
+        <select name="voucher_type_id" required class="type-select">
+          <option value="">선택</option>
+          {% for t in types if t.is_active %}<option value="{{ t.id }}" data-face="{{ t.face_value }}">{{ t.name }} {{ t.face_value|won }}원</option>{% endfor %}
+        </select>
+      </label>
+      <label>수량(매) <input type="number" name="quantity" min="1" step="1" required class="qty-input"></label>
+      <label>금액 <output class="amount-out">0원</output></label>
+      <label>구매처 <input name="counterparty" maxlength="200" placeholder="예: OO백화점"></label>
+      <label>일련번호 (선택) <input name="serial_no" maxlength="500" placeholder="예: A123450001~A123450010"></label>
+    </div>
+    <label>비고 <input name="purpose" maxlength="500" placeholder="예: 2026 추석 명절 선물용 구매"></label>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>닫기</button>
+      <button class="btn primary">입고 등록 (+)</button>
+    </div>
+  </form>
+</dialog>
+
+{# ---------------------------------------------------------------- 출고 등록 #}
+<dialog id="dlg-out">
+  <form method="post" action="{{ url_for('ledger.add_out') }}" class="stack calc-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <h2>출고(지급) 등록</h2>
+    <div class="grid2">
+      <label>지급일자 <input type="date" name="txn_date" value="{{ today }}" max="{{ today }}" required></label>
+      <label>상품권 종류 / 권종
+        <select name="voucher_type_id" required class="type-select">
+          <option value="">선택</option>
+          {% for t in types if t.is_active %}<option value="{{ t.id }}" data-face="{{ t.face_value }}" {{ 'disabled' if stock_by_type.get(t.id, 0) <= 0 }}>{{ t.name }} {{ t.face_value|won }}원 (재고 {{ stock_by_type.get(t.id, 0)|won }}매)</option>{% endfor %}
+        </select>
+      </label>
+      <label>수량(매) <input type="number" name="quantity" min="1" step="1" required class="qty-input"></label>
+      <label>금액 <output class="amount-out">0원</output></label>
+      <label>수령자
+        <select name="recipient_id" required>
+          <option value="">선택</option>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}{% if u.department %} ({{ u.department }}){% endif %} · {{ u.email }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>지급자
+        <select name="giver_id">
+          {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if u.id == g.user.id }}>{{ u.name }}{% if u.department %} ({{ u.department }}){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <label>일련번호 (선택) <input name="serial_no" maxlength="500"></label>
+      <label>용도 <input name="purpose" maxlength="500" placeholder="예: 우수사원 포상"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="send_request" value="1" checked> 등록 후 바로 수령자에게 <b>서명 요청 메일</b> 발송</label>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>닫기</button>
+      <button class="btn accent">출고 등록 (−)</button>
+    </div>
+  </form>
+</dialog>
+
+{# ---------------------------------------------------------------- 취소 #}
+<dialog id="dlg-void">
+  <form method="post" action="" class="stack" id="void-form" data-action-template="{{ url_for('ledger.void', txn_id=0) }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <h2>내역 취소(정정)</h2>
+    <p id="void-label" class="strong"></p>
+    <p class="muted small">대장 기록은 삭제되지 않고 '취소'로 표시되며, 재고·잔액 계산에서만 제외됩니다. 잘못 입력한 경우 취소 후 다시 등록하세요.</p>
+    <label>취소 사유 <input name="reason" required maxlength="500" placeholder="예: 수량 오입력"></label>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" data-close>닫기</button>
+      <button class="btn danger">취소 처리</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/ledger.js') }}"></script>{% endblock %}

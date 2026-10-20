@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}상품권 수령 확인 서명{% endblock %}
+{% block main_class %}narrow sign-page{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>상품권 수령 확인 서명</h1>
+  <p class="muted">{{ recipient.name }}{% if recipient.department %} ({{ recipient.department }}){% endif %}님, 아래 상품권 수령 내역을 확인하고 서명해 주세요.</p>
+
+  <table class="sheet compact">
+    <thead><tr><th>지급일</th><th>상품권</th><th class="num">권종</th><th class="num">수량</th><th class="num">금액</th></tr></thead>
+    <tbody>
+    {% for r in lines %}
+      <tr>
+        <td class="nowrap">{{ r.txn_date }}</td>
+        <td>{{ r.type_name }}{% if r.purpose %}<div class="muted small">{{ r.purpose }}</div>{% endif %}{% if r.serial_no %}<div class="muted small">No. {{ r.serial_no }}</div>{% endif %}</td>
+        <td class="num">{{ r.face_value|won }}</td>
+        <td class="num">{{ r.quantity|won }}</td>
+        <td class="num">{{ r.amount|won }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="4" class="right">합계</td><td class="num strong">{{ total|won }}원</td></tr></tfoot>
+  </table>
+
+  <form method="post" action="{{ action }}" class="stack" id="sign-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="signature" id="signature-data">
+    <label class="check agree">
+      <input type="checkbox" name="agree" value="1" required>
+      본인은 위 상품권을 정히 수령하였음을 확인합니다.
+    </label>
+    <label>성명 (본인 확인)
+      <input name="signer_name" required maxlength="50" placeholder="본인 성명을 입력하세요" autocomplete="name">
+    </label>
+    <div>
+      <div class="sig-head"><span>서명</span><button type="button" class="btn tiny ghost" id="sig-clear">지우기</button></div>
+      <canvas id="sig-pad" class="sig-pad" aria-label="서명 입력란"></canvas>
+      <p class="muted small">손가락(모바일) 또는 마우스로 서명란에 서명하세요.</p>
+    </div>
+    <button class="btn primary block big" id="sig-submit">서명 제출</button>
+  </form>
+  <p class="muted small">요청일 {{ req.requested_at[:16] }} · 서명 기한 {{ req.expires_at[:16] }}</p>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/signature.js') }}"></script>{% endblock %}

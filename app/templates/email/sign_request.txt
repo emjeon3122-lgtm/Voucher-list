@@ -1,0 +1,16 @@
+{{ req.name }}님, 안녕하세요.
+
+아래 상품권 지급 내역에 대한 수령 확인 서명을 요청드립니다.
+
+{% for r in req.lines -%}
+- {{ r.txn_date }} | {{ r.type_name }} {{ r.face_value|won }}원 × {{ r.quantity }}매 = {{ r.amount|won }}원{% if r.purpose %} ({{ r.purpose }}){% endif %}
+{% endfor %}
+합계: {{ req.total|won }}원
+
+아래 링크에 접속하여 서명해 주세요 (PC/모바일 모두 가능):
+{{ link }}
+
+서명 기한: {{ req.expires_at[:16] }}
+요청자: {{ requester.name }} ({{ requester.email }})
+
+※ 본 링크는 {{ req.name }}님 전용입니다. 다른 사람에게 전달하지 마세요.

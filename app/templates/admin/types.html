@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}상품권 종류/권종{% endblock %}
+{% block content %}
+<h1>상품권 종류 / 권종</h1>
+<p class="muted">상품권 종류와 권종(액면가)의 조합을 등록합니다. 예) 신세계상품권 50,000원 / 신세계상품권 10,000원 / 문화상품권 10,000원.
+권종 금액은 기존 기록 보호를 위해 수정할 수 없으며, 더 이상 쓰지 않는 권종은 '사용' 체크를 해제하세요.</p>
+
+<section class="panel">
+  <form method="post" action="{{ url_for('admin.type_create') }}" class="row">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>상품권 종류 <input name="name" required maxlength="100" placeholder="예: 신세계상품권"></label>
+    <label>권종(원) <input type="number" name="face_value" min="1" step="1" required placeholder="50000"></label>
+    <label>정렬순서 <input type="number" name="sort_order" value="0" class="short"></label>
+    <button class="btn primary">추가</button>
+  </form>
+</section>
+
+<table class="sheet edit-table">
+  <thead><tr><th>ID</th><th>상품권 종류</th><th class="num">권종</th><th>정렬</th><th>사용</th><th class="num">거래건수</th><th></th></tr></thead>
+  <tbody>
+  {% for t in types %}
+    <tr class="{{ 'void' if not t.is_active }}">
+      <td class="num">{{ t.id }}</td>
+      <td><input form="t-{{ t.id }}" name="name" value="{{ t.name }}" required></td>
+      <td class="num">{{ t.face_value|won }}원</td>
+      <td><input form="t-{{ t.id }}" type="number" name="sort_order" value="{{ t.sort_order }}" class="short"></td>
+      <td class="center"><input form="t-{{ t.id }}" type="checkbox" name="is_active" value="1" {{ 'checked' if t.is_active }}></td>
+      <td class="num">{{ t.used }}</td>
+      <td>
+        <form id="t-{{ t.id }}" method="post" action="{{ url_for('admin.type_update', type_id=t.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn tiny">저장</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="center muted pad">등록된 상품권 종류가 없습니다. 위에서 추가하세요.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

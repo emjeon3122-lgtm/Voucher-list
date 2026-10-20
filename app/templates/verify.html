@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}인증코드 입력{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>인증코드 입력</h1>
+  <p class="muted"><b>{{ email }}</b> 로 발송된 6자리 코드를 입력하세요.<br>메일이 보이지 않으면 정크 메일함도 확인해 주세요.</p>
+  <form method="post" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>인증코드
+      <input name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" autocomplete="one-time-code" class="code-input" required autofocus>
+    </label>
+    <button class="btn primary block">로그인</button>
+  </form>
+  <p class="center"><a href="{{ url_for('auth.login') }}">다른 메일로 / 코드 다시 받기</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}서명 완료{% endblock %}
+{% block main_class %}narrow sign-page{% endblock %}
+{% block content %}
+<div class="panel center">
+  <div class="done-mark">✔</div>
+  <h1>서명이 완료되었습니다</h1>
+  <p class="muted">{{ recipient.name }}님의 서명이 {{ req.signed_at }} 에 수불 관리 대장에 기록되었습니다.</p>
+  <table class="sheet compact">
+    <thead><tr><th>지급일</th><th>상품권</th><th class="num">수량</th><th class="num">금액</th></tr></thead>
+    <tbody>
+    {% for r in lines %}<tr><td>{{ r.txn_date }}</td><td>{{ r.type_name }} {{ r.face_value|won }}원</td><td class="num">{{ r.quantity|won }}</td><td class="num">{{ r.amount|won }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">이 창은 닫으셔도 됩니다.</p>
+</div>
+{% endblock %}

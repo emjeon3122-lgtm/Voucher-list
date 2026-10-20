@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}감사 로그{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>감사 로그 <small class="muted">최근 1,000건</small></h1>
+<div class="sheet-wrap">
+<table class="sheet">
+  <thead><tr><th>일시</th><th>사용자</th><th>작업</th><th>대상</th><th>내용</th><th>IP</th></tr></thead>
+  <tbody>
+  {% for a in rows %}
+    <tr>
+      <td class="nowrap small">{{ a.created_at }}</td>
+      <td class="nowrap">{{ a.user_name or '-' }} <span class="muted small">{{ a.user_email or '' }}</span></td>
+      <td class="nowrap"><code>{{ a.action }}</code></td>
+      <td class="nowrap">{{ a.target }}</td>
+      <td>{{ a.detail }}</td>
+      <td class="small">{{ a.ip }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="center muted pad">기록이 없습니다.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

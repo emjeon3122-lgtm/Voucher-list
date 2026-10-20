@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}로그인{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>로그인</h1>
+  <p class="muted">회사 메일(아웃룩) 주소를 입력하면 6자리 인증코드가 메일로 발송됩니다.</p>
+  <form method="post" action="{{ url_for('auth.login') }}" class="stack">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <label>회사 메일 주소
+      <input type="email" name="email" value="{{ email or '' }}" placeholder="name@company.co.kr" autocomplete="email" required autofocus>
+    </label>
+    <button class="btn primary block">인증코드 받기</button>
+  </form>
+</div>
+{% endblock %}

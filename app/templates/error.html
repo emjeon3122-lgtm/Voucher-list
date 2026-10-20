@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<div class="panel center">
+  <h1>{{ code }} · {{ title }}</h1>
+  {% if description %}<p class="muted">{{ description }}</p>{% endif %}
+  <p><a class="btn" href="{{ url_for('ledger.home') }}">처음으로</a></p>
+</div>
+{% endblock %}

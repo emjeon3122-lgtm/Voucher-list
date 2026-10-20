@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}내 수령 내역{% endblock %}
+{% block content %}
+{% set sign_labels = {'NONE': '', 'UNREQUESTED': '미요청', 'REQUESTED': '서명대기', 'SIGNED': '서명완료'} %}
+<h1>내 수령 내역</h1>
+
+{% if pending %}
+<section class="panel attention">
+  <h2>서명이 필요한 요청 {{ pending|length }}건</h2>
+  <ul class="plain">
+    {% for p in pending %}
+    <li>
+      <span>{{ p.requested_at[:16] }} 요청 · {{ p.line_count }}건 · 기한 {{ p.expires_at[:10] }}</span>
+      <a class="btn small accent" href="{{ url_for('sign.by_login', req_id=p.id) }}">지금 서명하기 ✍</a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div class="sheet-wrap">
+<table class="sheet">
+  <thead><tr><th>No</th><th>지급일자</th><th>상품권 종류</th><th class="num">권종</th><th class="num">수량</th><th class="num">금액</th><th>용도</th><th>지급자</th><th>서명상태</th><th>서명</th><th>서명일시</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'void' if r.is_void }}">
+      <td class="num">{{ r.id }}</td>
+      <td>{{ r.txn_date }}</td>
+      <td>{{ r.type_name }}</td>
+      <td class="num">{{ r.face_value|won }}</td>
+      <td class="num">{{ r.quantity|won }}</td>
+      <td class="num">{{ r.amount|won }}</td>
+      <td>{{ r.purpose }}{% if r.is_void %} <span class="muted">(취소: {{ r.void_reason }})</span>{% endif %}</td>
+      <td>{{ r.giver_name or '' }}</td>
+      <td><span class="badge s-{{ r.sign_status|lower }}">{{ sign_labels[r.sign_status] }}</span></td>
+      <td class="sig">{% if r.sign_status == 'SIGNED' %}<img src="{{ url_for('ledger.signature_image', txn_id=r.id) }}" alt="서명">{% endif %}</td>
+      <td class="small">{{ r.signed_at if r.sign_status == 'SIGNED' else '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="center muted pad">수령한 상품권 내역이 없습니다.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

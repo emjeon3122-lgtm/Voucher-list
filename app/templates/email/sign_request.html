@@ -1,0 +1,28 @@
+<div style="font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;font-size:14px;color:#222;max-width:640px">
+  <p>{{ req.name }}님, 안녕하세요.</p>
+  <p>아래 상품권 지급 내역에 대한 <b>수령 확인 서명</b>을 요청드립니다.</p>
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#d0d7de;font-size:13px;width:100%">
+    <tr style="background:#1f4e78;color:#ffffff">
+      <th align="left">지급일</th><th align="left">상품권</th><th align="right">권종</th><th align="right">수량</th><th align="right">금액</th>
+    </tr>
+    {% for r in req.lines %}
+    <tr>
+      <td>{{ r.txn_date }}</td>
+      <td>{{ r.type_name }}{% if r.purpose %}<br><span style="color:#666">{{ r.purpose }}</span>{% endif %}</td>
+      <td align="right">{{ r.face_value|won }}</td>
+      <td align="right">{{ r.quantity }}</td>
+      <td align="right">{{ r.amount|won }}</td>
+    </tr>
+    {% endfor %}
+    <tr style="background:#f2f5f9"><td colspan="4" align="right"><b>합계</b></td><td align="right"><b>{{ req.total|won }}원</b></td></tr>
+  </table>
+  <p style="margin:24px 0">
+    <a href="{{ link }}" style="background:#1f6feb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;display:inline-block">✍ 수령 확인 서명하기</a>
+  </p>
+  <p style="color:#666;font-size:12px">
+    버튼이 동작하지 않으면 아래 주소를 브라우저에 붙여넣으세요.<br>
+    <a href="{{ link }}" style="color:#1f6feb;word-break:break-all">{{ link }}</a><br><br>
+    서명 기한: {{ req.expires_at[:16] }} · 요청자: {{ requester.name }} ({{ requester.email }})<br>
+    본 링크는 {{ req.name }}님 전용입니다. 다른 사람에게 전달하지 마세요.
+  </p>
+</div>

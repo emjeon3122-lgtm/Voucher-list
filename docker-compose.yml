@@ -1,0 +1,12 @@
+services:
+  voucher:
+    build: .
+    image: voucher-ledger:latest
+    container_name: voucher-ledger
+    restart: unless-stopped
+    ports:
+      - "8000:8000"        # NAS의 8000 포트로 접속 (다른 포트를 쓰려면 앞쪽 숫자만 변경, 예: "18000:8000")
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data       # DB + 서명 이미지 + 백업 (NAS 백업 대상 폴더)
